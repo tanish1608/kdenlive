@@ -49,6 +49,9 @@ real output review are required. Use synthetic media for committed regressions.
    sequence, preview six deterministic inserts, apply one undoable batch. Pass
    duplicate delivery, stale revision, locked track, rollback, undo/redo, stop,
    project switching, and save/reopen checks before connecting providers.
+   The source for this slice now exists behind an off-by-default build option.
+   Qt-only transport/validation/rollback tests run locally; tests exercising the
+   real Kdenlive timeline are registered but await the complete build toolchain.
 3. **Grounded analysis/planner:** separate speech/visual caches, provider health,
    feasible-duration handling, generated music and honest review outcomes.
 4. **Travel recipes and captions:** postcards/adventure/diary, framing presets,
@@ -68,6 +71,11 @@ KDE/MLT SDK was not provisioned. About 9 GB of disk space was available at setup
 The Python foundation needs no SDK or new dependencies. Native compilation and
 GUI behavior remain unverified until the toolchain is available. Do not report
 passing Python tests as proof that a Kdenlive build works.
+
+The existing Homebrew Qt tools allowed compiled transport tests on this host.
+They linked Qt 6.9.0; this is sufficient for the transport test target but below
+the editor's minimum. The host's newer macOS SDK needed an explicit `arm_acle.h`
+include in the standalone test target. No system toolchain files were changed.
 
 No public fork remote or release was created. `upstream` points to KDE Invent;
 do not push feature commits there. The clone is shallow; fetch additional history

@@ -21,6 +21,7 @@ include(GenerateExportHeader)
 # Register CMake options
 option(RELEASE_BUILD "Remove Git revision from program version" ON) # To be switched on when releasing.
 option(BUILD_TESTING "Build tests" ON)
+option(BUILD_MONTAZ_ASSISTANT "Build experimental Montaz assistant integration" OFF)
 option(CRASH_AUTO_TEST "Auto-generate testcases upon some crashes (uses RTTR library, needed for fuzzing)" OFF)
 option(BUILD_FUZZING "Build fuzzing target" OFF)
 option(BUILD_QCH "Build source code documentation in QCH format (for e.g. Qt Assistant, Qt Creator & KDevelop)" OFF)

@@ -19,11 +19,16 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Upstream: KDE Invent, tag `v26.08.1`, commit
   `55e16e85cd9a9c6e032cd27a621137b4da881a7c`.
 - Branch: `codex/ai-assistant-foundation`; remote `upstream` is read-only by intent.
-- Implemented: offline proposal validation and explicit run/stage lifecycle.
-- Not yet implemented: native AI dock, editor snapshot bridge, atomic application
-  of proposals, provider integrations, travel recipe execution, or GUI regression
-  validation. The foundation is not yet a working AI editor.
-- No native editor core has been replaced or modified in this foundation.
+- Implemented and tested: proposal contracts, strict wire parsing, a deterministic
+  Python worker, Qt process transport, bounded Stop/deadline handling, native-side
+  validation, batch rollback/commit logic, and redacted run diagnostics.
+- Written behind `BUILD_MONTAZ_ASSISTANT=ON`, awaiting a full native build:
+  dock, sequence snapshot/revision bridge, proposal list, and undoable application
+  through Kdenlive's own insertion API. It is disabled in default builds.
+- Still pending: full editor compilation, GUI/save/reopen/export validation,
+  provider integrations, audio pairing, and travel recipe execution. The current
+  worker is a video-only integration diagnostic, not an editorial model.
+- See [native integration](native-integration.md) for exact verification limits.
 
 ## First integration milestone
 
@@ -33,7 +38,7 @@ the proposed changes, and applies an approved proposal as one undoable native
 operation. A manual edit invalidates an outstanding proposal. Replayed messages
 cannot insert a second copy of the sequence.
 
-Start with a deterministic six-clip synthetic proposal before connecting any
+The current implementation uses a deterministic six-clip proposal before connecting any
 model. Verify apply, undo, redo, seek, save/reopen, cancellation, and export.
 Then connect the planner and evaluate real footage. This isolates integration
 failures from model-quality failures.

@@ -27,11 +27,14 @@ Run the dependency-free assistant suite from the repository root:
 
 ```sh
 PYTHONPATH=assistant/src python3 -m unittest discover -s assistant/tests -v
+python3 assistant/tools/run_native_tests.py --qmake /path/to/Qt/bin/qmake
 ```
 
 For native work follow `dev-docs/build.md`, using KDE Craft on macOS. Once
 dependencies are installed, configure with `cmake -S . -B build -DBUILD_TESTING=ON`,
 build with `cmake --build build`, and run `ctest --test-dir build --output-on-failure`.
+Enable the experimental panel with `-DBUILD_MONTAZ_ASSISTANT=ON`; see
+`dev-docs/montaz/native-integration.md` for the remaining integration gates.
 Do not describe native integration as verified without compiling and exercising it.
 
 ## Style and Testing

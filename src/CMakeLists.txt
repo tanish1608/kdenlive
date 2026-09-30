@@ -40,6 +40,9 @@ endif()
 
 ### Find source files
 add_subdirectory(abstractmodel)
+if(BUILD_MONTAZ_ASSISTANT)
+    add_subdirectory(assistant)
+endif()
 add_subdirectory(assets)
 add_subdirectory(audiomixer)
 add_subdirectory(bin)
@@ -104,6 +107,12 @@ file(GLOB kdenlive_UIS "ui/*.ui")
 ki18n_wrap_ui(kdenlive_UIS ${kdenlive_UIS})
 
 add_library(kdenliveLib STATIC ${kdenlive_SRCS} ${kdenlive_UIS} definitions.h lib/localeHandling.cpp lib/localeHandling.h)
+
+if(BUILD_MONTAZ_ASSISTANT)
+    target_compile_definitions(kdenliveLib PRIVATE
+        MONTAZ_ASSISTANT_ENABLED
+        MONTAZ_ASSISTANT_SOURCE_DIR="${CMAKE_SOURCE_DIR}/assistant/src")
+endif()
 
 kconfig_target_kcfg_file(kdenliveLib
     FILE kdenlivesettings.kcfg

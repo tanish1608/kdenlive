@@ -43,6 +43,10 @@ set(KdenliveTest_SOURCES
 
 include(ECMAddTests)
 
+if(BUILD_MONTAZ_ASSISTANT)
+    list(APPEND KdenliveTest_SOURCES assistanttest.cpp)
+endif()
+
 foreach(_source ${KdenliveTest_SOURCES})
   get_filename_component(_targetname ${_source} NAME_WE)
   ecm_add_test(
@@ -54,4 +58,7 @@ foreach(_source ${KdenliveTest_SOURCES})
       LINK_LIBRARIES kdenliveLib
   )
   set_property(TARGET ${_targetname} PROPERTY CXX_STANDARD 14)
+  if(_targetname STREQUAL "assistanttest")
+    set_property(TARGET ${_targetname} PROPERTY CXX_STANDARD 17)
+  endif()
 endforeach()

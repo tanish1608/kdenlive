@@ -5,6 +5,9 @@ SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
 */
 
 #include "mainwindow.h"
+#ifdef MONTAZ_ASSISTANT_ENABLED
+#include "assistant/assistantwidget.h"
+#endif
 #include "assets/assetpanel.hpp"
 #include "audiomixer/mixermanager.hpp"
 #include "bin/clipcreator.hpp"
@@ -494,6 +497,12 @@ void MainWindow::init()
 
     m_undoView->setContextMenuPolicy(Qt::ActionsContextMenu);
     m_undoViewDock = addDock(i18n("Undo History"), QStringLiteral("undo_history"), m_undoView, KDDockWidgets::Location_None, m_projectBinDock);
+
+#ifdef MONTAZ_ASSISTANT_ENABLED
+    auto assistantDock = addDock(i18n("AI Assistant"), QStringLiteral("montaz_assistant"), new Montaz::AssistantWidget(),
+                                 KDDockWidgets::Location_None, m_projectBinDock);
+    assistantDock->close();
+#endif
 
     connect(m_commandStack, &QUndoGroup::cleanChanged, [this, cleanHistory](bool isClean) {
         m_saveAction->setDisabled(isClean);

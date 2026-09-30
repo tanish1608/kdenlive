@@ -8,10 +8,12 @@
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Kdenlive + MLT | Project/bin, sequence, tracks, playback, frame timing, undo/redo, subtitles, effects, rendering | Editorial model calls |
-| Native assistant dock/adapter (planned) | Snapshot capture, proposal preview, approval, revision checks, native command application, worker lifecycle | A second timeline or player |
+| Native assistant dock/adapter (experimental) | Snapshot capture, proposal preview, approval, revision checks, native command application, worker lifecycle | A second timeline or player |
 | Python assistant | Analysis cache, provider requests, editorial plans, recipe constraints, run events | Mutable editor state or direct project-file writes |
 
-One local worker per editor process, with a project-scoped active run. Use
+At most one live worker per editor process, with a project-scoped active run. The
+diagnostic implementation starts a fresh process for each request and waits for
+its clean exit before enabling Apply. Use
 versioned newline-delimited JSON over `QProcess` stdin/stdout, not another HTTP
 server, WebSocket, CRDT, or agent messaging framework. Logs go to stderr or a
 project-local run directory; stdout is protocol only. Bound message sizes and
@@ -89,6 +91,11 @@ editor undo. Apply batches execute atomically; stopping cannot leave half an edi
 Run records capture provider/model versions, durations, cache hits, validation
 failures, critic outcome, proposal IDs, and editor acknowledgments. Redact secrets
 from structured and text logs. Footage/transcripts are project data, not telemetry.
+
+The diagnostic implementation records timestamps, run/stage outcomes, revision,
+asset count, and apply result in the application's cache at `montaz/runs/*.jsonl`.
+It does not record bin paths, source text, environment variables, worker stderr,
+or free-form event reasons. Provider/cache metrics and log retention are pending.
 
 ## Native integration locations
 
