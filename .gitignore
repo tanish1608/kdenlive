@@ -23,3 +23,13 @@ compile_commands.json
 
 # Artefacts from running KDE CI locally
 kde-ci-reports/*
+
+# Montaz assistant development and private runtime data
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+/assistant/.runtime/
