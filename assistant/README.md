@@ -82,7 +82,7 @@ footage paths/descriptions/briefs/shot reasons and provider stderr are excluded.
 
 Gemini uses the official [GenerateContent REST API](https://ai.google.dev/api/generate-content)
 with JSON output, followed by strict local/native validation. Narration, source
-audio pairing, sound effects, subtitle styling, and beat-based editing remain pending.
+audio pairing, subtitle styling, and beat-based editing remain pending.
 
 ## Instrumental music
 
@@ -93,7 +93,7 @@ independent of the requested draft duration. Choose a travel pacing preset for
 the mood. The current brief adds editorial context. Listen to the proposed track,
 then **Apply music** imports and inserts it on a free unlocked audio track. One
 native Undo reverses both operations. Existing audio is preserved; automatic
-ducking and sound effects are not implemented.
+ducking is not implemented; short effects use the separate sound workflow below.
 
 Set `ELEVENLABS_API_KEY` or `elevenlabs_api_key` in the same private assistant
 settings. `ELEVENLABS_MUSIC_MODEL` / `elevenlabs_music_model` defaults to
@@ -121,7 +121,7 @@ Music preview uses Qt audio; Kdenlive remains the timeline playback authority.
 
 ## Occasional sound effects
 
-**Add sound** asks for one description and a 0.5–10 second duration. Put the
+**Add sound > Describe a sound** asks for one description and a 0.5–10 second duration. Put the
 playhead inside a shot first. The editor captures that position, limits the sound
 to the shot and chooses a free unlocked audio track. Review its position and
 Listen before **Apply sound**. One native Undo removes both clip and imported
@@ -144,6 +144,23 @@ one bounded generation request with no automatic network retry. Provider timeout
 is 60 seconds and the entire native request has a three-minute deadline.
 
 API reference: [Create sound effect](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert).
+
+### Suggestions from existing footage
+
+Choose **Add sound > Suggest sounds** after visual planning. This checks only the
+video sources already used on the timeline, reusing current cached observations;
+missing entries are skipped without reanalysis. One Gemini text request proposes
+up to three spaced sounds from a small category list. The review shows each
+observation, position, duration and generator prompt. Silent visual evidence
+cannot establish which sounds were recorded.
+
+Select a cue and choose **Generate selected sound**, then Listen and Apply as
+above. The selected source hash and native context are checked again before
+requesting audio. Suggestions alone never contact ElevenLabs or change the edit.
+Zero cues, no cached evidence, Stop and worker failure all finish explicitly.
+The conservative eligibility gate accepts one track of up to 64 normal-speed,
+video-only shots without clip effects, groups or transitions; existing audio must
+be assistant music/effects, and each cue needs free unlocked audio space.
 
 ## Local cut timing
 

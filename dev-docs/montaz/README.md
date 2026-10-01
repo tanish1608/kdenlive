@@ -51,9 +51,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   ineligible. Accents are not verified beats or phrases.
 - **Add sound** generates one explicitly described ElevenLabs sound effect at the
   playhead, with bounded duration, private raw/prepared reuse, preview and native
-  undoable audio insertion. Automatic event recognition is still pending.
+  undoable audio insertion. Its **Suggest sounds** action reuses cached visual
+  observations for sparse reviewed foley cues, followed by separate selected
+  generation. This is not audio-event recognition.
 - Still pending: deferred portrait framing, additional native failure checks,
-  narration, audio pairing/ducking, automatic sound cue selection, beat-aligned cuts, subtitle styling,
+  narration, audio pairing/ducking, beat-aligned cuts, subtitle styling,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;
   passing integration checks does not make it a finished travel film.
 - See [native integration](native-integration.md) for exact verification limits.

@@ -135,7 +135,7 @@ QJsonObject Montaz::EditorAdapter::snapshot()
     return validateSnapshot(snapshot).isEmpty() ? snapshot : QJsonObject{};
 }
 
-QJsonObject Montaz::EditorAdapter::mediaSources(const QJsonObject &context)
+QJsonObject Montaz::EditorAdapter::mediaSources(const QJsonObject &context, const QSet<QString> &selected)
 {
     if (snapshot() != context) return {};
     QJsonObject sources;
@@ -143,6 +143,7 @@ QJsonObject Montaz::EditorAdapter::mediaSources(const QJsonObject &context)
         const auto asset = value.toObject();
         if (!asset.value(QStringLiteral("has_video")).toBool()) continue;
         const auto id = asset.value(QStringLiteral("bin_id")).toString();
+        if (!selected.isEmpty() && !selected.contains(id)) continue;
         const auto clip = pCore->projectItemModel()->getClipByBinID(id);
         if (!clip || !QFileInfo(clip->clipUrl()).isFile()) return {};
         sources.insert(id, QFileInfo(clip->clipUrl()).absoluteFilePath());
@@ -214,7 +215,7 @@ QJsonObject Montaz::EditorAdapter::musicRequest(const QString &recipe, const QSt
     return {};
 }
 
-QJsonObject Montaz::EditorAdapter::effectRequest(const QString &instruction, int durationFrames)
+QJsonObject Montaz::EditorAdapter::effectRequest(const QString &instruction, int durationFrames, int startFrame)
 {
     const auto current = snapshot();
     if (current.isEmpty() || !m_document->url().isLocalFile()) return {};
@@ -222,7 +223,7 @@ QJsonObject Montaz::EditorAdapter::effectRequest(const QString &instruction, int
     const QString directory = project.absolutePath() + QLatin1Char('/') + project.completeBaseName() + QStringLiteral(".assets/effects");
     const QString path = directory + QLatin1Char('/') + QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".wav");
     QJsonObject effect{{QStringLiteral("path"), path},
-                       {QStringLiteral("start_frame"), pCore->getMonitorPosition()},
+                       {QStringLiteral("start_frame"), startFrame < 0 ? pCore->getMonitorPosition() : startFrame},
                        {QStringLiteral("duration_frames"), durationFrames},
                        {QStringLiteral("instruction"), instruction}};
     for (const auto value : current.value(QStringLiteral("tracks")).toArray()) {
@@ -268,6 +269,59 @@ QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const
     m_appliedRequests.insert(request);
     invalidate();
     return {};
+}
+
+QJsonObject Montaz::EditorAdapter::cueRequest()
+{
+    const auto current = snapshot();
+    const auto timeline = m_timeline.lock();
+    if (current.isEmpty() || !timeline || timeline->getCompositionsCount()) return {};
+    std::vector<QJsonObject> visuals;
+    for (const auto v : current.value(QStringLiteral("occupied")).toArray()) {
+        auto item = v.toObject();
+        const int id = item.value(QStringLiteral("instance_id")).toString().toInt();
+        if (timeline->isAudioTrack(item.value(QStringLiteral("track_id")).toString().toInt())) {
+            const auto clip = pCore->projectItemModel()->getClipByBinID(timeline->getClipBinId(id));
+            if (!clip) return {};
+            const auto role = clip->getProducerProperty(QStringLiteral("kdenlive:montaz_role"));
+            if (role != QStringLiteral("music") && role != QStringLiteral("effect") &&
+                !QFileInfo(clip->clipUrl()).absolutePath().endsWith(QStringLiteral(".assets/music")))
+                return {};
+            continue;
+        }
+        if (timeline->isInGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 || timeline->getClipSpeed(id) != 1.0 ||
+            timeline->getClipEffectStackModel(id)->rowCount() > 0 || timeline->getClipState(id).first != PlaylistState::VideoOnly)
+            return {};
+        item[QStringLiteral("bin_id")] = timeline->getClipBinId(id);
+        item[QStringLiteral("in_frame")] = timeline->getClipIn(id);
+        visuals.push_back(item);
+    }
+    std::sort(visuals.begin(), visuals.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        return a.value(QStringLiteral("start_frame")).toInt() < b.value(QStringLiteral("start_frame")).toInt();
+    });
+    QJsonArray clips;
+    for (const auto &v : visuals)
+        clips.append(v);
+    const QJsonObject spec{{QStringLiteral("clips"), clips}};
+    return validateCueRequest(current, spec).isEmpty() ? spec : QJsonObject{};
+}
+
+QJsonObject Montaz::EditorAdapter::effectFromCue(const QJsonObject &context, const QJsonObject &spec, const QJsonObject &review, int index)
+{
+    if (snapshot() != context || cueRequest() != spec || !validateSoundCues(context, spec, review).isEmpty()) return {};
+    const auto cues = review.value(QStringLiteral("cues")).toArray();
+    if (index < 0 || index >= cues.size()) return {};
+    const auto cue = cues[index].toObject();
+    const auto timeline = m_timeline.lock();
+    if (!timeline) return {};
+    const auto clip = pCore->projectItemModel()->getClipByBinID(timeline->getClipBinId(cue.value(QStringLiteral("instance_id")).toString().toInt()));
+    if (!clip) return {};
+    QFile file(clip->clipUrl());
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024) return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!hash.addData(&file) || QString::fromLatin1(hash.result().toHex()) != cue.value(QStringLiteral("source_sha256")).toString()) return {};
+    return effectRequest(cue.value(QStringLiteral("instruction")).toString(), cue.value(QStringLiteral("duration_frames")).toInt(),
+                         cue.value(QStringLiteral("start_frame")).toInt());
 }
 
 QJsonObject Montaz::EditorAdapter::timingRequest()

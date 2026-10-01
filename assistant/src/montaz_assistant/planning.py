@@ -263,6 +263,7 @@ def analyze(
     cache_dir: Path,
     provider: Gemini,
     media: MediaTools,
+    cache_only: bool = False,
 ) -> tuple[list[dict], bool]:
     media.check()
     path = Path(source)
@@ -296,11 +297,11 @@ def analyze(
             # No provider call or fabricated observation for blink-length sources.
             return [], False
         windows = candidates(replace(asset, duration_frames=visual_length), rate)
-        result, hit = _cached_visual(path, identity, windows, rate, cache, provider, media)
+        result, hit = _cached_visual(path, identity, windows, rate, cache, provider, media, cache_only)
         return [{**w, "content_id": digest.hexdigest()} for w in result], hit
 
 
-def _cached_visual(path, identity, windows, rate, cache, provider, media):
+def _cached_visual(path, identity, windows, rate, cache, provider, media, cache_only=False):
     cache_dir = cache.parent
     try:
         result = validate_analysis(decode(cache.read_bytes()), windows)
@@ -310,6 +311,8 @@ def _cached_visual(path, identity, windows, rate, cache, provider, media):
     except (OSError, ProposalError, AssistantError) as exc:
         if isinstance(exc, AssistantError) and exc.code == "media_changed":
             raise
+    if cache_only:
+        raise AssistantError("analysis_unavailable")
     parts = []
     for window in windows:
         parts.append(

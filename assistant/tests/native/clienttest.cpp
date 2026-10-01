@@ -123,6 +123,36 @@ QJsonObject timingProposal()
     return value;
 }
 
+QJsonObject cueSpec()
+{
+    return {{"clips", timingSpec()["clips"]}};
+}
+QJsonObject cueSnapshot()
+{
+    auto value = timingSnapshot();
+    auto occupied = value["occupied"].toArray();
+    occupied.removeLast();
+    value["occupied"] = occupied;
+    return value;
+}
+QJsonObject cueReview()
+{
+    return {{"request_id", "request"},
+            {"project_id", "project"},
+            {"sequence_id", "sequence"},
+            {"base_revision", 2},
+            {"frame_rate", snapshot()["frame_rate"]},
+            {"cached_assets", 3},
+            {"unavailable_assets", 0},
+            {"cues", QJsonArray{QJsonObject{{"instance_id", "shot0"},
+                                            {"category", "waves"},
+                                            {"start_frame", 0},
+                                            {"duration_frames", 60},
+                                            {"instruction", "Gentle coastal waves"},
+                                            {"reason", "Visible coastal water"},
+                                            {"source_sha256", QString(64, 'a')}}}}};
+}
+
 void fakeWorker(const QString &path, const QByteArray &script)
 {
     QVERIFY(QDir().mkpath(path + QStringLiteral("/montaz_assistant")));
@@ -206,6 +236,92 @@ EXIT
             QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
             QCOMPARE(failures.count(), fault > 0 && fault != 3 ? 1 : 0);
             QCOMPARE(stopped.count(), fault == 3 ? 1 : 0);
+        }
+    }
+    void cuesRequireNativeShotBoundsEvidenceIdentityAndSparseAvailableAudio()
+    {
+        QVERIFY(Montaz::validateCueRequest(cueSnapshot(), cueSpec()).isEmpty());
+        QVERIFY(Montaz::validateSoundCues(cueSnapshot(), cueSpec(), cueReview()).isEmpty());
+        for (const auto &change : {QJsonObject{{"instance_id", "missing"}}, QJsonObject{{"category", "explosion"}}, QJsonObject{{"start_frame", 1}},
+                                   QJsonObject{{"duration_frames", 14}}, QJsonObject{{"duration_frames", true}}, QJsonObject{{"source_sha256", "invalid"}},
+                                   QJsonObject{{"reason", ""}}}) {
+            auto review = cueReview();
+            auto cue = review["cues"].toArray()[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                cue[it.key()] = it.value();
+            review["cues"] = QJsonArray{cue};
+            QVERIFY(!Montaz::validateSoundCues(cueSnapshot(), cueSpec(), review).isEmpty());
+        }
+        auto review = cueReview();
+        review["base_revision"] = 3;
+        QVERIFY(!Montaz::validateSoundCues(cueSnapshot(), cueSpec(), review).isEmpty());
+        review = cueReview();
+        review["cached_assets"] = 2;
+        QVERIFY(!Montaz::validateSoundCues(cueSnapshot(), cueSpec(), review).isEmpty());
+        auto cues = cueReview()["cues"].toArray();
+        auto second = cues[0].toObject();
+        second["instance_id"] = "shot1";
+        second["category"] = "kart_engine";
+        second["start_frame"] = 60;
+        cues.append(second);
+        review = cueReview();
+        review["cues"] = cues;
+        QVERIFY(!Montaz::validateSoundCues(cueSnapshot(), cueSpec(), review).isEmpty());
+        second["instance_id"] = "shot2";
+        second["start_frame"] = 120;
+        cues[1] = second;
+        review["cues"] = cues;
+        QVERIFY(Montaz::validateSoundCues(cueSnapshot(), cueSpec(), review).isEmpty());
+        QVERIFY(!Montaz::validateSoundCues(timingSnapshot(), cueSpec(), review).isEmpty());
+        review["cues"] = QJsonArray{};
+        QVERIFY(Montaz::validateSoundCues(timingSnapshot(), cueSpec(), review).isEmpty());
+        auto spec = cueSpec();
+        auto clips = spec["clips"].toArray();
+        clips.removeLast();
+        spec["clips"] = clips;
+        QVERIFY(!Montaz::validateCueRequest(cueSnapshot(), spec).isEmpty());
+    }
+    void cuesRequireCompleteCacheProgressCleanExitAndSupportStop()
+    {
+        const QByteArray script = R"PY(import json,sys,signal,time
+r=json.loads(sys.stdin.readline())
+def send(x): print(json.dumps({'version':1,**x}),flush=True)
+send({'type':'ready'})
+for n,status in enumerate(('running','running'),1):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'sound_cues','status':status,'reason':''})
+FAULT
+send({'type':'cue_progress','completed':3,'cached':3,'total':3,'model':'gemini-test'})
+for n in (3,4):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':'sound_cues' if n==3 else None,'status':'completed','reason':''})
+s=r['snapshot']
+p=dict(request_id=r['request_id'],project_id=s['project_id'],sequence_id=s['sequence_id'],base_revision=s['revision'],frame_rate=s['frame_rate'],cached_assets=3,unavailable_assets=0,cues=[dict(instance_id='shot0',category='waves',start_frame=0,duration_frames=60,instruction='Gentle waves',reason='Visible water',source_sha256='a'*64)])
+CHANGE
+send({'type':'sound_cues','review':p})
+EXIT
+)PY";
+        for (int fault = 0; fault < 7; ++fault) {
+            auto worker = script;
+            worker.replace("FAULT", fault == 6 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)" : "pass");
+            worker.replace("CHANGE", fault == 1   ? "p['cues']=[]"
+                                     : fault == 2 ? "p['base_revision']=3"
+                                     : fault == 4 ? "p['cached_assets']=2;p['unavailable_assets']=1"
+                                                  : "pass");
+            if (fault == 3) worker.replace("'completed':3", "'completed':2").replace("'cached':3", "'cached':2");
+            worker.replace("EXIT", fault == 5 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::soundCuesReady), failures(&client, &Montaz::WorkerClient::failed),
+                stopped(&client, &Montaz::WorkerClient::stopped);
+            QVERIFY(client.start(cueSnapshot(), {{"cues", cueSpec()}, {"sources", QJsonObject{{"1", "/one.mov"}, {"2", "/two.mov"}, {"3", "/three.mov"}}}}));
+            if (fault == 6) {
+                QTest::qWait(100);
+                client.stop();
+            }
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            QCOMPARE(ready.count(), fault < 2 ? 1 : 0);
+            QCOMPARE(failures.count(), fault >= 2 && fault < 6 ? 1 : 0);
+            QCOMPARE(stopped.count(), fault == 6 ? 1 : 0);
         }
     }
     void musicIsBoundToTheIssuedPathSpanTrackAndRevision()

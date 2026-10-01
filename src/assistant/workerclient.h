@@ -22,6 +22,7 @@ public:
 
 Q_SIGNALS:
     void busyChanged(bool busy);
+    void soundCuesReady(const QJsonObject &review);
     void soundtrackReady(const QJsonObject &soundtrack);
     void timingReady(const QJsonObject &proposal);
     void proposalReady(const QJsonObject &proposal);
@@ -47,6 +48,9 @@ private:
     QJsonObject m_timingSpec;
     bool m_timingRequest{false};
     QJsonObject m_soundtrack;
+    bool m_cueRequest{false};
+    QJsonObject m_cueSpec;
+    QJsonObject m_cueReview;
     bool m_musicRequest{false};
     bool m_effectRequest{false};
     int m_musicPhase{0};

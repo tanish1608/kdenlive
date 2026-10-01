@@ -241,6 +241,110 @@ QString Montaz::validateMusicRequest(const QJsonObject &snapshot, const QJsonObj
     return first == start && last == start + length ? QString() : invalid();
 }
 
+QString Montaz::validateCueRequest(const QJsonObject &snapshot, const QJsonObject &spec)
+{
+    const auto clips = spec.value(QStringLiteral("clips")).toArray();
+    if (!validateSnapshot(snapshot).isEmpty() || !fields(spec, {QStringLiteral("clips")}) || !spec.value(QStringLiteral("clips")).isArray() ||
+        clips.isEmpty() || clips.size() > 64)
+        return invalid();
+    QMap<QString, QJsonObject> assets, tracks, occupied;
+    for (const auto v : snapshot.value(QStringLiteral("assets")).toArray())
+        assets[v.toObject().value(QStringLiteral("bin_id")).toString()] = v.toObject();
+    for (const auto v : snapshot.value(QStringLiteral("tracks")).toArray())
+        tracks[v.toObject().value(QStringLiteral("track_id")).toString()] = v.toObject();
+    QSet<QString> visuals, seen;
+    for (const auto v : snapshot.value(QStringLiteral("occupied")).toArray()) {
+        const auto item = v.toObject();
+        occupied[item.value(QStringLiteral("instance_id")).toString()] = item;
+        if (tracks.value(item.value(QStringLiteral("track_id")).toString()).value(QStringLiteral("kind")) == QStringLiteral("video"))
+            visuals.insert(item.value(QStringLiteral("instance_id")).toString());
+    }
+    qint64 previous = -1;
+    QString trackId;
+    for (const auto v : clips) {
+        const auto c = v.toObject(), asset = assets.value(c.value(QStringLiteral("bin_id")).toString());
+        const auto item = occupied.value(c.value(QStringLiteral("instance_id")).toString());
+        const auto track = c.value(QStringLiteral("track_id")).toString(), id = c.value(QStringLiteral("instance_id")).toString();
+        if (!fields(c, {QStringLiteral("instance_id"), QStringLiteral("bin_id"), QStringLiteral("track_id"), QStringLiteral("start_frame"),
+                        QStringLiteral("in_frame"), QStringLiteral("duration_frames")}) ||
+            !identifier(c.value(QStringLiteral("instance_id"))) || !identifier(c.value(QStringLiteral("bin_id"))) ||
+            !identifier(c.value(QStringLiteral("track_id"))) || !range(c, QStringLiteral("start_frame")) || !range(c, QStringLiteral("in_frame")) ||
+            item.isEmpty() || seen.contains(id) || !asset.value(QStringLiteral("has_video")).toBool() ||
+            tracks.value(track).value(QStringLiteral("kind")) != QStringLiteral("video") ||
+            c.value(QStringLiteral("in_frame")).toInteger() + c.value(QStringLiteral("duration_frames")).toInteger() >
+                asset.value(QStringLiteral("duration_frames")).toInteger() ||
+            c.value(QStringLiteral("start_frame")).toInteger() < previous || (!trackId.isEmpty() && trackId != track))
+            return invalid();
+        for (const auto &key : {QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames")})
+            if (c.value(key) != item.value(key)) return invalid();
+        previous = c.value(QStringLiteral("start_frame")).toInteger() + c.value(QStringLiteral("duration_frames")).toInteger();
+        trackId = track;
+        seen.insert(id);
+    }
+    return seen == visuals ? QString() : invalid();
+}
+
+QString Montaz::validateSoundCues(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review)
+{
+    if (!validateCueRequest(snapshot, spec).isEmpty() ||
+        !fields(review, {QStringLiteral("request_id"), QStringLiteral("project_id"), QStringLiteral("sequence_id"), QStringLiteral("base_revision"),
+                         QStringLiteral("frame_rate"), QStringLiteral("cached_assets"), QStringLiteral("unavailable_assets"), QStringLiteral("cues")}) ||
+        !identifier(review.value(QStringLiteral("request_id"))) || review.value(QStringLiteral("project_id")) != snapshot.value(QStringLiteral("project_id")) ||
+        review.value(QStringLiteral("sequence_id")) != snapshot.value(QStringLiteral("sequence_id")) ||
+        review.value(QStringLiteral("base_revision")) != snapshot.value(QStringLiteral("revision")) ||
+        review.value(QStringLiteral("frame_rate")) != snapshot.value(QStringLiteral("frame_rate")) || !review.value(QStringLiteral("cues")).isArray() ||
+        review.value(QStringLiteral("cues")).toArray().size() > 3 || !integer(review.value(QStringLiteral("cached_assets")), 1) ||
+        !integer(review.value(QStringLiteral("unavailable_assets"))))
+        return invalid();
+    QMap<QString, QJsonObject> clips;
+    QSet<QString> bins, instances, categories;
+    for (const auto v : spec.value(QStringLiteral("clips")).toArray()) {
+        const auto c = v.toObject();
+        clips[c.value(QStringLiteral("instance_id")).toString()] = c;
+        bins.insert(c.value(QStringLiteral("bin_id")).toString());
+    }
+    if (review.value(QStringLiteral("cached_assets")).toInteger() + review.value(QStringLiteral("unavailable_assets")).toInteger() != bins.size())
+        return invalid();
+    const auto rate = snapshot.value(QStringLiteral("frame_rate")).toObject();
+    const qint64 num = rate.value(QStringLiteral("numerator")).toInteger(), den = rate.value(QStringLiteral("denominator")).toInteger();
+    qint64 previousStart = -1, previousEnd = -1;
+    for (const auto v : review.value(QStringLiteral("cues")).toArray()) {
+        const auto c = v.toObject();
+        const auto id = c.value(QStringLiteral("instance_id")).toString(), category = c.value(QStringLiteral("category")).toString();
+        const auto clip = clips.value(id);
+        if (!fields(c, {QStringLiteral("instance_id"), QStringLiteral("category"), QStringLiteral("start_frame"), QStringLiteral("duration_frames"),
+                        QStringLiteral("instruction"), QStringLiteral("reason"), QStringLiteral("source_sha256")}) ||
+            !range(c, QStringLiteral("start_frame")) || clip.isEmpty() || instances.contains(id) || categories.contains(category) ||
+            !QStringList{QStringLiteral("waves"), QStringLiteral("water"), QStringLiteral("kart_engine"), QStringLiteral("wind"), QStringLiteral("footsteps")}
+                 .contains(category) ||
+            !c.value(QStringLiteral("instruction")).isString() || c.value(QStringLiteral("instruction")).toString().trimmed().isEmpty() ||
+            c.value(QStringLiteral("instruction")).toString().size() > 1000 || !c.value(QStringLiteral("reason")).isString() ||
+            c.value(QStringLiteral("reason")).toString().trimmed().isEmpty() || c.value(QStringLiteral("reason")).toString().size() > 600 ||
+            !QRegularExpression(QStringLiteral("^[a-f0-9]{64}$")).match(c.value(QStringLiteral("source_sha256")).toString()).hasMatch())
+            return invalid();
+        const qint64 start = c.value(QStringLiteral("start_frame")).toInteger(), length = c.value(QStringLiteral("duration_frames")).toInteger();
+        if (2 * length * den < num || length * den > 2 * num || start < clip.value(QStringLiteral("start_frame")).toInteger() ||
+            start + length > clip.value(QStringLiteral("start_frame")).toInteger() + clip.value(QStringLiteral("duration_frames")).toInteger() ||
+            start < previousEnd || (previousStart >= 0 && (start - previousStart) * den < 3 * num))
+            return invalid();
+        QJsonObject effect{{QStringLiteral("path"), QStringLiteral("/editor-issued-placeholder.wav")},
+                           {QStringLiteral("start_frame"), start},
+                           {QStringLiteral("duration_frames"), length},
+                           {QStringLiteral("instruction"), c.value(QStringLiteral("instruction"))}};
+        bool available = false;
+        for (const auto t : snapshot.value(QStringLiteral("tracks")).toArray()) {
+            effect[QStringLiteral("track_id")] = t.toObject().value(QStringLiteral("track_id"));
+            available |= validateEffectRequest(snapshot, effect).isEmpty();
+        }
+        if (!available) return invalid();
+        instances.insert(id);
+        categories.insert(category);
+        previousStart = start;
+        previousEnd = start + length;
+    }
+    return {};
+}
+
 QString Montaz::validateEffectRequest(const QJsonObject &snapshot, const QJsonObject &effect)
 {
     const auto path = effect.value(QStringLiteral("path")).toString();

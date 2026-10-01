@@ -13,6 +13,7 @@ from .gemini import AssistantError, Gemini
 from .lifecycle import Run, Status
 from .music import ElevenLabs, compose_music
 from .timing import refine_timing
+from .sound_cues import suggest_sounds
 from .planning import MediaTools, brief_from_wire, plan_media
 from .protocol import (
     MAX_MESSAGE_BYTES,
@@ -103,9 +104,12 @@ def main() -> int:
         effect = request.get("type") == "compose_effect"
         musical = request.get("type") in {"compose_music", "compose_effect"}
         timing = request.get("type") == "refine_timing"
+        cues = request.get("type") == "suggest_sounds"
         fields(
             request,
-            keys | {"timing"}
+            keys | {"cues", "sources"}
+            if cues
+            else keys | {"timing"}
             if timing
             else keys | {"effect" if effect else "music"}
             if musical
@@ -123,6 +127,7 @@ def main() -> int:
                 "compose_music",
                 "compose_effect",
                 "refine_timing",
+                "suggest_sounds",
             }
         ):
             raise ProposalError("Unsupported request")
@@ -132,7 +137,9 @@ def main() -> int:
         if type(request_id) is not str or not request_id or len(request_id) > 128:
             raise ProposalError("Invalid request ID")
         stage = (
-            "timing"
+            "sound_cues"
+            if cues
+            else "timing"
             if timing
             else "effect"
             if effect
@@ -144,7 +151,41 @@ def main() -> int:
         send_event(run.events[-1])
         run.transition(stage, Status.RUNNING)
         send_event(run.events[-1])
-        if timing:
+        if cues:
+            provider = Gemini.configured()
+            cache = Path(
+                os.environ.get(
+                    "MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis"
+                )
+            )
+
+            def cue_progress(completed, cached, total):
+                media.check()
+                output.write(
+                    encode(
+                        dict(
+                            version=1,
+                            type="cue_progress",
+                            completed=completed,
+                            cached=cached,
+                            total=total,
+                            model=provider.model,
+                        )
+                    )
+                )
+                output.flush()
+
+            cue_review = suggest_sounds(
+                snapshot,
+                request_id,
+                request["cues"],
+                request["sources"],
+                cache,
+                provider,
+                media,
+                cue_progress,
+            )
+        elif timing:
             proposal = refine_timing(snapshot, request_id, request["timing"], media)
         elif musical:
             provider = (
@@ -202,7 +243,9 @@ def main() -> int:
         run.finish()
         send_event(run.events[-1])
         message = (
-            {"version": 1, "type": "timing", "proposal": proposal}
+            {"version": 1, "type": "sound_cues", "review": cue_review}
+            if cues
+            else {"version": 1, "type": "timing", "proposal": proposal}
             if timing
             else {"version": 1, "type": "soundtrack", "soundtrack": soundtrack}
             if musical

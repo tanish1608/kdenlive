@@ -129,3 +129,34 @@ prototype; signal measurements do not establish perceptual sound-design quality.
 92 Python checks, 27 Qt transport checks and 7 chat checks (including fixtures),
 plus native `assistanttest`, pass. Automatic cue selection, source-audio pairing,
 ducking and narration/captions remain pending; portrait framing remains deferred.
+
+## Cached cue checkpoint
+
+`goa-cues-review.kdenlive` adds a separately selected pool-water effect to the
+previous timing/music/coastal-sound review. One native suggestion run checked only
+seven selected unique sources: three current analyses were reusable and four
+unavailable entries were skipped, with no fallback visual analysis. Gemini
+selected one supported cue; the run completed in 11.49 seconds including worker
+startup. It is an observed run, not a controlled speed or editorial benchmark.
+
+The cue starts at **frame 188 (6.273 s)** and lasts **51 frames (1.7017 s)**, wholly
+inside the pool shot. Native seeking at `00:00:06,08` displayed the pool. Generation
+was explicitly selected after reviewing the cached observation; ElevenLabs then
+completed in 2.51 seconds, independently of suggestion selection. The prepared
+48 kHz stereo WAV has **81,682 samples**, measures **-26.0 LUFS / -8.8 dBFS true
+peak**, and uses quiet level/soft edges. These are proposed water sounds, not
+recovered location audio.
+
+Listen toggled on and returned to idle. Native Apply imported/injected one cue;
+one Undo restored all previous media, trims and positions, and Redo restored the
+same applied timeline. Save/reopen retained the new relative effect resource.
+Stop during separate suggestion runs, both before and after reopening, reached
+terminal tasks and left the edit unchanged. Run logs contain counts/model and
+outcomes, not observations, prompts or source paths.
+
+Native export `~/Movies/goa-cues-review.mp4` contains **474 frames** at 30000/1001
+FPS, 1920×1080. Every decoded video frame exactly matches `goa-sound-review.mp4`.
+The combined audio measures **-17.9 LUFS / -4.7 dBFS true peak**, without clipping.
+The source footage, previous projects and exports are preserved outside Git.
+Portrait framing is still deferred. Speech/ducking, captions, perceptual listening
+review, broader categories and cue selection on complex timelines remain open.

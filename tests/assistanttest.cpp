@@ -139,9 +139,10 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
     pCore->projectManager()->testSetDocument(&document);
     auto timeline = TimelineItemModel::construct(document.uuid(), stack);
     pCore->projectManager()->testSetActiveTimeline(timeline);
-    int video = -1, audio = -1;
+    int video = -1, audio = -1, spareAudio = -1;
     REQUIRE(timeline->requestTrackInsertion(-1, video));
     REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    REQUIRE(timeline->requestTrackInsertion(-1, spareAudio, QString(), true));
     {
         const auto fps = pCore->getProjectFpsInfo();
         const int shot = int(2.0 * fps.first / fps.second);
@@ -182,6 +183,35 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
                              {QStringLiteral("music_sha256"), timing.value(QStringLiteral("music")).toObject().value(QStringLiteral("sha256"))},
                              {QStringLiteral("accents"), QJsonArray{shot + 3, 2 * shot - 3}},
                              {QStringLiteral("operations"), operations}};
+        SECTION("Cue capture is read-only and rejects missing source evidence before generation")
+        {
+            const auto spec = adapter.cueRequest();
+            REQUIRE(spec.value(QStringLiteral("clips")) == timing.value(QStringLiteral("clips")));
+            auto cue = spec.value(QStringLiteral("clips")).toArray()[0].toObject();
+            cue.remove(QStringLiteral("bin_id"));
+            cue.remove(QStringLiteral("track_id"));
+            cue.remove(QStringLiteral("in_frame"));
+            cue[QStringLiteral("category")] = QStringLiteral("waves");
+            cue[QStringLiteral("duration_frames")] = int(fps.first / fps.second);
+            cue[QStringLiteral("instruction")] = QStringLiteral("Gentle water");
+            cue[QStringLiteral("reason")] = QStringLiteral("Visible water");
+            cue[QStringLiteral("source_sha256")] = QString(64, 'a');
+            QJsonObject review{{QStringLiteral("request_id"), QStringLiteral("native-cues")},
+                               {QStringLiteral("project_id"), context.value(QStringLiteral("project_id"))},
+                               {QStringLiteral("sequence_id"), context.value(QStringLiteral("sequence_id"))},
+                               {QStringLiteral("base_revision"), context.value(QStringLiteral("revision"))},
+                               {QStringLiteral("frame_rate"), context.value(QStringLiteral("frame_rate"))},
+                               {QStringLiteral("cached_assets"), 1},
+                               {QStringLiteral("unavailable_assets"), 0},
+                               {QStringLiteral("cues"), QJsonArray{cue}}};
+            REQUIRE(Montaz::validateSoundCues(context, spec, review).isEmpty());
+            // Synthetic MLT producer has no source file matching cached visual evidence.
+            REQUIRE(adapter.effectFromCue(context, spec, review, 0).isEmpty());
+            REQUIRE(adapter.effectFromCue(context, spec, review, -1).isEmpty());
+            REQUIRE(adapter.snapshot() == context);
+            REQUIRE(stack->count() == 0);
+            REQUIRE(timeline->getClipsCount() == 4);
+        }
         SECTION("Apply and one Undo/Redo preserve IDs, source starts, bin, audio and duration")
         {
             const int assets = bin->getAllClipIds().size();

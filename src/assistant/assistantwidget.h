@@ -28,6 +28,8 @@ private:
     void clearProposal();
     void composeMusic();
     void composeEffect();
+    void suggestSounds();
+    void beginEffect(const QJsonObject &spec);
     void refineTiming();
     void planEdit(const QString &message);
     void reply(const QString &message);
@@ -49,6 +51,9 @@ private:
     QMediaPlayer *m_audioPreview;
     bool m_musicMode{false};
     bool m_effectMode{false};
+    bool m_cueMode{false};
+    QJsonObject m_cueSpec;
+    QJsonObject m_cueReview;
     QJsonObject m_musicSpec;
     QJsonObject m_soundtrack;
     QPushButton *m_plan;

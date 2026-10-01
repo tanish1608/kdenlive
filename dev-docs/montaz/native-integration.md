@@ -180,3 +180,23 @@ Apply/Undo/Redo, relative effect resources, save/reopen and native export. The
 unchanged. The mixed export measures -18.0 LUFS / -4.7 dBFS true peak. The user
 still chooses the sound and position explicitly; this is not automatic sound
 design, verified sound-event recognition, ducking or caption generation.
+
+## Cached cue selection gate
+
+`Suggest sounds` uses selected-source cached visual evidence, followed by a
+separate Gemini text selection. No visual provider call, audio generation or
+native mutation is permitted at this step. Python regressions cover cache-only
+misses/stale entries, selected-source maps, source failures, usable trims,
+fractional FPS, sparse spacing, known categories, no audio space and Stop.
+Qt tests bind cues to native shot intervals, current context, hashes and complete
+cache progress; empty success, malformed results, failed exit and uncooperative
+Stop are exercised. Native tests verify cue capture does not change the timeline
+or undo history, and a source missing its evidence hash cannot start generation.
+
+The updated native editor and `assistanttest` compile and pass on macOS arm64;
+100 Python, 29 Qt transport and 7 chat checks pass. Live Goa verification reuses
+three valid analyses, skips four unavailable entries, generates one selected
+pool-water cue, and checks preview completion, Apply/one Undo/Redo, saving,
+reopening and native export. See [output review](quality-review.md) for the exact
+interval and exported-frame/audio measurements. This is proposed foley from
+silent video, not verified audible-event detection or autonomous sound design.

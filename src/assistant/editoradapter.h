@@ -20,11 +20,13 @@ public:
     void refreshContext();
     QString contextKey();
     QJsonObject snapshot();
-    QJsonObject mediaSources(const QJsonObject &snapshot);
+    QJsonObject mediaSources(const QJsonObject &snapshot, const QSet<QString> &selected = {});
+    QJsonObject cueRequest();
+    QJsonObject effectFromCue(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review, int index);
     QJsonObject timingRequest();
     QString applyTiming(const QJsonObject &snapshot, const QJsonObject &timing, const QJsonObject &proposal);
     QJsonObject musicRequest(const QString &recipe, const QString &instruction);
-    QJsonObject effectRequest(const QString &instruction, int durationFrames);
+    QJsonObject effectRequest(const QString &instruction, int durationFrames, int startFrame = -1);
     QString applySoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack, bool effect = false);
     QString apply(const QJsonObject &proposal);
 

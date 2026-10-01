@@ -160,3 +160,24 @@ The output is a visual prototype: substantial pillarboxing and no sound are its
 largest remaining quality gaps. Continue with explicit orientation/native framing,
 then ElevenLabs music and measured audio timing. Narration/captions and bounded
 revision follow; publication and packaging remain deferred.
+
+## Sparse cached sound cues — October 1, 2026
+
+The Add sound menu now offers described sound and cached-footage suggestions.
+Only selected timeline sources are resolved; unrelated missing imported assets
+cannot block cue lookup. Current visual cache entries are read locally with two
+readers, never reanalyzed. Gemini selects up to three known sparse foley categories;
+local code derives usable intervals, spacing and audio availability. A selected
+cue requires separate ElevenLabs generation, Listen and native Apply. Reviews
+are bound to source hash and native context; missing evidence and zero cues end
+explicitly, and Stop discards late results. This is not audible-event detection.
+
+100 Python, 29 Qt transport and 7 chat checks pass; native `assistanttest` passes.
+The separate Goa cue project reused three analyses, skipped four unavailable
+entries and generated one 51-frame pool-water cue at frame 188. Preview,
+Apply/one Undo/Redo, exact pool seeking, save/reopen, Stop and native export were
+checked. All 474 decoded visual frames match the previous sound export; the mix
+measures -17.9 LUFS / -4.7 dBFS true peak. See quality-review.md for limitations.
+Next gates remain separately cached speech/narration, silent-input skipping and
+native caption styles, plus bounded editorial revision. Portrait framing and
+packaging/publication remain deferred.

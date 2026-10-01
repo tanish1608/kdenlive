@@ -116,8 +116,7 @@ activity/ending guidance, and per-shot reasons. Sampled analysis cannot guarante
 frame-perfect motion or good storytelling. Instrumental music can follow an
 applied visual edit; a separate reviewed local refinement can move cuts to energy
 accents within native source limits. Speech,
-beat/phrase alignment, automatic sound cue selection, framing, transitions and subtitle style
-operations remain pending. Portrait framing is deferred by the user.
+beat/phrase alignment, framing, transitions and subtitle style operations remain pending. Portrait framing is deferred by the user.
 
 Optional editorial review metadata accompanies the existing insertion contract;
 native validation binds its shot identities and durations to the proposal. The UI
@@ -161,3 +160,28 @@ retention and measured editorial quality evaluation remain pending.
 Keep the adapter small and feature-gated. Prefer upstreamable changes and preserve
 Kdenlive's license/attribution. Do not transplant an unreviewed community fork or
 depend on Linux D-Bus for the macOS path.
+
+## Cached sound suggestions
+
+`Add sound > Suggest sounds` captures all native video-only instances on one
+track (up to 64). Groups, clip effects, speed changes and transitions are excluded;
+existing audio must be assistant music/effects. Only the selected unique sources
+are resolved, hashed and probed. Cache-only analysis reads current content/model/
+frame-rate/version entries with two local readers; missing or invalid entries are
+skipped, never silently reanalyzed. No valid entries is a terminal unavailable
+state. One Gemini text request selects at most three distinct foley categories
+from cached silent observations; an empty selection is valid.
+
+Cue intervals are derived locally from each original source trim and cached usable
+window, bounded to 0.5–2 seconds, at least three seconds apart, and inside one shot
+with a free unlocked audio interval. The model supplies neither timestamps nor
+file paths. Review shows the exact observation and proposed generator prompt;
+these are editorial sounds, not detected or recovered location audio.
+
+Generating the selected cue rechecks native revision/shot identity and source hash
+(with a 128 MiB native source-verification limit), obtains a native destination and track,
+and uses the existing cancellable ElevenLabs effect worker. Generation cannot
+apply audio; Listen and native Apply/one Undo remain separate. A changed source or
+sequence invalidates the review. Structured logs include cache/cue counts and
+model identity, never observations, prompts or file paths. Progress and clean
+worker exit are required even for zero suggestions; Stop discards late results.

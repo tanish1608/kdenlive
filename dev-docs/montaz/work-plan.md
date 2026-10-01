@@ -83,8 +83,11 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    is limited to one quarter second and available source length. These are not
    verified beat/phrase boundaries. Explicit sound descriptions now produce one
    previewable ElevenLabs effect at the playhead, using the existing native audio
-   import/undo path. Automatic cue selection, beat/phrase analysis, ducking and
-   native fade-effect proposals remain pending.
+   import/undo path. Cached visual observations now support up to three sparse
+   reviewed foley suggestions; a selected cue must be generated and previewed
+   separately before native Apply. Live Goa verification is recorded in the
+   quality review. Beat/phrase analysis, ducking and native fade-effect proposals
+   remain pending.
 3. **Narration and captions:** separately cached speech evidence, per-project mode,
    native subtitle styles. Silent footage must skip speech-only jobs. Test style
    switching without subtitle duplication or timing drift.
