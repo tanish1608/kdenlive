@@ -81,7 +81,9 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    visual frames and measures -18.1 LUFS / -5.0 dBFS true peak. Local energy-accent
    cut proposals and native undoable retiming are implemented; each boundary shift
    is limited to one quarter second and available source length. These are not
-   verified beat/phrase boundaries. Effects, beat/phrase analysis, ducking and
+   verified beat/phrase boundaries. Explicit sound descriptions now produce one
+   previewable ElevenLabs effect at the playhead, using the existing native audio
+   import/undo path. Automatic cue selection, beat/phrase analysis, ducking and
    native fade-effect proposals remain pending.
 3. **Narration and captions:** separately cached speech evidence, per-project mode,
    native subtitle styles. Silent footage must skip speech-only jobs. Test style

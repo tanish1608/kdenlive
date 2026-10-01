@@ -49,8 +49,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   It preserves shot order, source starts, clip IDs, music and total span; reviewed
   changes use native resize/move operations and one Undo. Complex timelines are
   ineligible. Accents are not verified beats or phrases.
+- **Add sound** generates one explicitly described ElevenLabs sound effect at the
+  playhead, with bounded duration, private raw/prepared reuse, preview and native
+  undoable audio insertion. Automatic event recognition is still pending.
 - Still pending: deferred portrait framing, additional native failure checks,
-  narration, audio pairing/ducking, effects, beat-aligned cuts, subtitle styling,
+  narration, audio pairing/ducking, automatic sound cue selection, beat-aligned cuts, subtitle styling,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;
   passing integration checks does not make it a finished travel film.
 - See [native integration](native-integration.md) for exact verification limits.

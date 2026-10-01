@@ -33,6 +33,14 @@ and MLT stream/duration before importing and inserting in one undoable batch.
 It never executes a provider-selected path or edits the project file. Music
 generation has one bounded request; cache reuse avoids automatic regeneration.
 
+`compose_effect` uses the same generated-audio result envelope and native
+import/undo path as music, with a separate request validator. It captures a
+0.5–10 second interval at the project playhead that fits inside one visual shot,
+uses a free audio track and labels the imported asset as an effect. The role is
+issued by the editor request, not inferred from provider output. Music-accent
+retiming rejects additional effects/audio. Each sound is described explicitly;
+no visual observation is treated as evidence of audible speech or an event.
+
 ## Snapshot and proposal
 
 The native adapter issues a snapshot with project ID, sequence ID, monotonically
@@ -108,7 +116,7 @@ activity/ending guidance, and per-shot reasons. Sampled analysis cannot guarante
 frame-perfect motion or good storytelling. Instrumental music can follow an
 applied visual edit; a separate reviewed local refinement can move cuts to energy
 accents within native source limits. Speech,
-beat/phrase alignment, sound effects, framing, transitions and subtitle style
+beat/phrase alignment, automatic sound cue selection, framing, transitions and subtitle style
 operations remain pending. Portrait framing is deferred by the user.
 
 Optional editorial review metadata accompanies the existing insertion contract;

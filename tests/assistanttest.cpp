@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #include "assistant/editbatch.h"
 #include "assistant/editoradapter.h"
+#include "assistant/proposal.h"
+#include "bin/projectclip.h"
 #include "doc/kdenlivedoc.h"
 #include "test_utils.hpp"
 
@@ -258,8 +260,9 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
     pCore->projectManager()->testSetDocument(nullptr);
 }
 
-TEST_CASE("Assistant imports music and places it with one native undo", "[Montaz]")
+TEST_CASE("Assistant imports generated audio and places it with one native undo", "[Montaz]")
 {
+    const bool effect = GENERATE(false, true);
     QTemporaryDir temporary;
     REQUIRE(temporary.isValid());
     auto bin = pCore->projectItemModel();
@@ -281,10 +284,16 @@ TEST_CASE("Assistant imports music and places it with one native undo", "[Montaz
         REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/%2").arg(source).arg(frames - 1), video, 20, visual));
         stack->clear();
         Montaz::EditorAdapter adapter;
-        const auto music = adapter.musicRequest(QStringLiteral("postcard"), QStringLiteral("Coastal travel"));
+        auto music = adapter.musicRequest(QStringLiteral("postcard"), QStringLiteral("Coastal travel"));
         REQUIRE_FALSE(music.isEmpty());
         REQUIRE(music.value(QStringLiteral("path")).toString().startsWith(temporary.filePath(QStringLiteral("travel.assets/music/"))));
         REQUIRE(music.value(QStringLiteral("duration_frames")) == frames);
+        if (effect) {
+            music.remove(QStringLiteral("recipe"));
+            music[QStringLiteral("start_frame")] = 30;
+            music[QStringLiteral("duration_frames")] = int(std::ceil(2.0 * fps.first / fps.second));
+            REQUIRE(Montaz::validateEffectRequest(adapter.snapshot(), music).isEmpty());
+        }
         const auto context = adapter.snapshot();
         // A local PCM WAV exercises actual MLT import, not a mock insertion callback.
         QFile wave(music.value(QStringLiteral("path")).toString());
@@ -312,30 +321,33 @@ TEST_CASE("Assistant imports music and places it with one native undo", "[Montaz
                                {QStringLiteral("base_revision"), context.value(QStringLiteral("revision"))},
                                {QStringLiteral("frame_rate"), context.value(QStringLiteral("frame_rate"))},
                                {QStringLiteral("sha256"), QString::fromLatin1(hash)},
-                               {QStringLiteral("accents"), QJsonArray{30, 60}},
+                               {QStringLiteral("accents"), effect ? QJsonArray{} : QJsonArray{30, 60}},
                                {QStringLiteral("cached"), false}};
         for (const auto &key : {QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames")})
             soundtrack[key] = music.value(key);
         const int before = bin->getAllClipIds().size();
         SECTION("Apply, undo and redo retain visual edit and generated file")
         {
-            REQUIRE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE(adapter.applySoundtrack(context, music, soundtrack, effect).isEmpty());
             REQUIRE(stack->count() == 1);
             REQUIRE(bin->getAllClipIds().size() == before + 1);
             REQUIRE(timeline->getTrackClipsCount(audio) == 1);
             REQUIRE(timeline->getTrackClipsCount(video) == 1);
-            const int id = timeline->getClipByPosition(audio, 20);
+            const int position = music.value(QStringLiteral("start_frame")).toInt(), length = music.value(QStringLiteral("duration_frames")).toInt();
+            const int id = timeline->getClipByPosition(audio, position);
             REQUIRE(id >= 0);
-            REQUIRE(timeline->getClipPlaytime(id) == frames);
-            REQUIRE(timeline->getClipByPosition(audio, 20 + frames - 1) == id);
+            REQUIRE(bin->getClipByBinID(timeline->getClipBinId(id))->getProducerProperty(QStringLiteral("kdenlive:montaz_role")) ==
+                    (effect ? QStringLiteral("effect") : QStringLiteral("music")));
+            REQUIRE(timeline->getClipPlaytime(id) == length);
+            REQUIRE(timeline->getClipByPosition(audio, position + length - 1) == id);
             REQUIRE(timeline->checkConsistency());
-            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack, effect).isEmpty());
             stack->undo();
             REQUIRE(timeline->getTrackClipsCount(audio) == 0);
             REQUIRE(timeline->getTrackClipsCount(video) == 1);
             REQUIRE(bin->getAllClipIds().size() == before);
             REQUIRE(QFileInfo::exists(music.value(QStringLiteral("path")).toString()));
-            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack, effect).isEmpty());
             stack->redo();
             REQUIRE(timeline->getTrackClipsCount(audio) == 1);
             REQUIRE(bin->getAllClipIds().size() == before + 1);
@@ -346,7 +358,7 @@ TEST_CASE("Assistant imports music and places it with one native undo", "[Montaz
             REQUIRE(wave.open(QIODevice::WriteOnly | QIODevice::Append));
             wave.write("changed");
             wave.close();
-            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack, effect).isEmpty());
             REQUIRE(bin->getAllClipIds().size() == before);
             REQUIRE(timeline->getTrackClipsCount(audio) == 0);
             REQUIRE(stack->count() == 0);
@@ -355,7 +367,7 @@ TEST_CASE("Assistant imports music and places it with one native undo", "[Montaz
         {
             timeline->setTrackLockedState(audio, true);
             timeline->setTrackLockedState(audio, false);
-            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack, effect).isEmpty());
             REQUIRE(bin->getAllClipIds().size() == before);
             REQUIRE(timeline->getTrackClipsCount(audio) == 0);
         }

@@ -214,10 +214,28 @@ QJsonObject Montaz::EditorAdapter::musicRequest(const QString &recipe, const QSt
     return {};
 }
 
-QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const QJsonObject &music, const QJsonObject &soundtrack)
+QJsonObject Montaz::EditorAdapter::effectRequest(const QString &instruction, int durationFrames)
+{
+    const auto current = snapshot();
+    if (current.isEmpty() || !m_document->url().isLocalFile()) return {};
+    const QFileInfo project(m_document->url().toLocalFile());
+    const QString directory = project.absolutePath() + QLatin1Char('/') + project.completeBaseName() + QStringLiteral(".assets/effects");
+    const QString path = directory + QLatin1Char('/') + QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".wav");
+    QJsonObject effect{{QStringLiteral("path"), path},
+                       {QStringLiteral("start_frame"), pCore->getMonitorPosition()},
+                       {QStringLiteral("duration_frames"), durationFrames},
+                       {QStringLiteral("instruction"), instruction}};
+    for (const auto value : current.value(QStringLiteral("tracks")).toArray()) {
+        effect[QStringLiteral("track_id")] = value.toObject().value(QStringLiteral("track_id"));
+        if (validateEffectRequest(current, effect).isEmpty()) return QDir().mkpath(directory) ? effect : QJsonObject{};
+    }
+    return {};
+}
+
+QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const QJsonObject &music, const QJsonObject &soundtrack, bool effect)
 {
     if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
-    if (snapshot() != context || !validateSoundtrack(context, music, soundtrack).isEmpty()) return QStringLiteral("invalid_soundtrack");
+    if (snapshot() != context || !validateSoundtrack(context, music, soundtrack, effect).isEmpty()) return QStringLiteral("invalid_soundtrack");
     const auto request = soundtrack.value(QStringLiteral("request_id")).toString();
     if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
     QFile file(music.value(QStringLiteral("path")).toString());
@@ -231,8 +249,8 @@ QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const
     if (!timeline || !producer->is_valid() || producer->get_int("audio_index") < 0 || producer->get_int("video_index") >= 0 ||
         producer->get_playtime() < length)
         return QStringLiteral("invalid_soundtrack");
-    producer->set("kdenlive:clipname", i18n("Assistant music").toUtf8().constData());
-    producer->set("kdenlive:montaz_role", "music");
+    producer->set("kdenlive:clipname", (effect ? i18n("Assistant sound effect") : i18n("Assistant music")).toUtf8().constData());
+    producer->set("kdenlive:montaz_role", effect ? "effect" : "music");
     UndoFunction undo = []() { return true; }, redo = []() { return true; };
     QString binId;
     const auto bin = pCore->projectItemModel();
@@ -246,7 +264,7 @@ QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const
         if (!rolledBack) m_applyHealthy = false;
         return rolledBack ? QStringLiteral("music_insert_failed") : QStringLiteral("rollback_failed");
     }
-    pCore->pushUndo(undo, redo, i18n("Add assistant music"));
+    pCore->pushUndo(undo, redo, effect ? i18n("Add assistant sound effect") : i18n("Add assistant music"));
     m_appliedRequests.insert(request);
     invalidate();
     return {};

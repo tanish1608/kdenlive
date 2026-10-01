@@ -48,6 +48,7 @@ private:
     bool m_timingRequest{false};
     QJsonObject m_soundtrack;
     bool m_musicRequest{false};
+    bool m_effectRequest{false};
     int m_musicPhase{0};
     QString m_requestId;
     QString m_failure;

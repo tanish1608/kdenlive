@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .contracts import InsertClip, Proposal, ProposalError, validate_proposal
+from .effects import ElevenLabsEffects, compose_effect
 from .gemini import AssistantError, Gemini
 from .lifecycle import Run, Status
 from .music import ElevenLabs, compose_music
@@ -26,10 +27,14 @@ from .protocol import (
 
 def propose_demo(snapshot, request_id: str) -> Proposal:
     """Append up to six distinct visual sources to an unlocked video track."""
-    tracks = [track for track in snapshot.tracks if track.kind == "video" and not track.locked]
+    tracks = [
+        track for track in snapshot.tracks if track.kind == "video" and not track.locked
+    ]
     assets = [asset for asset in snapshot.assets if asset.has_video][:6]
     if not tracks or not assets:
-        raise ProposalError("Import video and unlock a video track before requesting a preview")
+        raise ProposalError(
+            "Import video and unlock a video track before requesting a preview"
+        )
     target = tracks[0]
     position = max(
         (item.start_frame + item.duration_frames for item in snapshot.occupied),
@@ -95,13 +100,14 @@ def main() -> int:
         request = decode(line)
         keys = {"version", "type", "request_id", "snapshot"}
         real = request.get("type") == "plan_media"
-        musical = request.get("type") == "compose_music"
+        effect = request.get("type") == "compose_effect"
+        musical = request.get("type") in {"compose_music", "compose_effect"}
         timing = request.get("type") == "refine_timing"
         fields(
             request,
             keys | {"timing"}
             if timing
-            else keys | {"music"}
+            else keys | {"effect" if effect else "music"}
             if musical
             else keys | {"sources", "brief"}
             if real
@@ -110,7 +116,14 @@ def main() -> int:
         if (
             type(request["version"]) is not int
             or request["version"] != 1
-            or request["type"] not in {"plan_demo", "plan_media", "compose_music", "refine_timing"}
+            or request["type"]
+            not in {
+                "plan_demo",
+                "plan_media",
+                "compose_music",
+                "compose_effect",
+                "refine_timing",
+            }
         ):
             raise ProposalError("Unsupported request")
         # Validate request IDs through the same typed proposal constructor.
@@ -118,7 +131,15 @@ def main() -> int:
         request_id = request["request_id"]
         if type(request_id) is not str or not request_id or len(request_id) > 128:
             raise ProposalError("Invalid request ID")
-        stage = "timing" if timing else "music" if musical else "planner"
+        stage = (
+            "timing"
+            if timing
+            else "effect"
+            if effect
+            else "music"
+            if musical
+            else "planner"
+        )
         run = Run(request_id, (stage,))
         send_event(run.events[-1])
         run.transition(stage, Status.RUNNING)
@@ -126,7 +147,9 @@ def main() -> int:
         if timing:
             proposal = refine_timing(snapshot, request_id, request["timing"], media)
         elif musical:
-            provider = ElevenLabs.configured()
+            provider = (
+                ElevenLabsEffects.configured() if effect else ElevenLabs.configured()
+            )
 
             def music_progress(phase, cached):
                 output.write(
@@ -142,14 +165,23 @@ def main() -> int:
                 )
                 output.flush()
 
-            soundtrack = compose_music(
-                snapshot, request_id, request["music"], provider, media, music_progress
+            soundtrack = (compose_effect if effect else compose_music)(
+                snapshot,
+                request_id,
+                request["effect" if effect else "music"],
+                provider,
+                media,
+                music_progress,
             )
         elif real:
             brief = brief_from_wire(request["brief"])
-            provider = Gemini.configured()  # Missing keys fail before media/provider work.
+            provider = (
+                Gemini.configured()
+            )  # Missing keys fail before media/provider work.
             cache = Path(
-                os.environ.get("MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis")
+                os.environ.get(
+                    "MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis"
+                )
             )
             reviews = []
             proposal = plan_media(

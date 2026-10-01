@@ -241,9 +241,42 @@ QString Montaz::validateMusicRequest(const QJsonObject &snapshot, const QJsonObj
     return first == start && last == start + length ? QString() : invalid();
 }
 
-QString Montaz::validateSoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack)
+QString Montaz::validateEffectRequest(const QJsonObject &snapshot, const QJsonObject &effect)
 {
-    if (!validateMusicRequest(snapshot, music).isEmpty() ||
+    const auto path = effect.value(QStringLiteral("path")).toString();
+    if (!validateSnapshot(snapshot).isEmpty() ||
+        !fields(effect, {QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames"),
+                         QStringLiteral("instruction")}) ||
+        !range(effect, QStringLiteral("start_frame")) || !effect.value(QStringLiteral("path")).isString() || path.size() > 4096 ||
+        !QFileInfo(path).isAbsolute() || QFileInfo(path).suffix() != QStringLiteral("wav") || !effect.value(QStringLiteral("instruction")).isString() ||
+        effect.value(QStringLiteral("instruction")).toString().trimmed().isEmpty() || effect.value(QStringLiteral("instruction")).toString().size() > 1000)
+        return invalid();
+    const auto rate = snapshot.value(QStringLiteral("frame_rate")).toObject();
+    const qint64 num = rate.value(QStringLiteral("numerator")).toInteger(), den = rate.value(QStringLiteral("denominator")).toInteger();
+    const qint64 start = effect.value(QStringLiteral("start_frame")).toInteger(), length = effect.value(QStringLiteral("duration_frames")).toInteger();
+    if (2 * length * den < num || length * den > 10 * num) return invalid();
+    QSet<QString> videoTracks;
+    bool target = false, covered = false;
+    for (const auto value : snapshot.value(QStringLiteral("tracks")).toArray()) {
+        const auto track = value.toObject();
+        if (track.value(QStringLiteral("kind")) == QStringLiteral("video")) videoTracks.insert(track.value(QStringLiteral("track_id")).toString());
+        if (track.value(QStringLiteral("track_id")) == effect.value(QStringLiteral("track_id")) &&
+            track.value(QStringLiteral("kind")) == QStringLiteral("audio") && !track.value(QStringLiteral("locked")).toBool())
+            target = true;
+    }
+    for (const auto value : snapshot.value(QStringLiteral("occupied")).toArray()) {
+        const auto item = value.toObject();
+        const qint64 position = item.value(QStringLiteral("start_frame")).toInteger(),
+                     end = position + item.value(QStringLiteral("duration_frames")).toInteger();
+        if (item.value(QStringLiteral("track_id")) == effect.value(QStringLiteral("track_id")) && start < end && position < start + length) return invalid();
+        if (videoTracks.contains(item.value(QStringLiteral("track_id")).toString()) && position <= start && start + length <= end) covered = true;
+    }
+    return target && covered ? QString() : invalid();
+}
+
+QString Montaz::validateSoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack, bool effect)
+{
+    if (!(effect ? validateEffectRequest(snapshot, music) : validateMusicRequest(snapshot, music)).isEmpty() ||
         !fields(soundtrack, {QStringLiteral("request_id"), QStringLiteral("project_id"), QStringLiteral("sequence_id"), QStringLiteral("base_revision"),
                              QStringLiteral("frame_rate"), QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"),
                              QStringLiteral("duration_frames"), QStringLiteral("sha256"), QStringLiteral("accents"), QStringLiteral("cached")}) ||
@@ -258,7 +291,7 @@ QString Montaz::validateSoundtrack(const QJsonObject &snapshot, const QJsonObjec
     for (const auto &key : {QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames")})
         if (soundtrack.value(key) != music.value(key)) return invalid();
     const auto accents = soundtrack.value(QStringLiteral("accents")).toArray();
-    if (accents.size() > 128) return invalid();
+    if (accents.size() > 128 || (effect && !accents.isEmpty())) return invalid();
     qint64 previous = 0;
     for (const auto value : accents) {
         if (!integer(value, 1) || value.toInteger() <= previous || value.toInteger() >= soundtrack.value(QStringLiteral("duration_frames")).toInteger())

@@ -234,6 +234,36 @@ EXIT
         editor["occupied"] = occupied;
         QVERIFY(!Montaz::validateMusicRequest(editor, musicSpec()).isEmpty());
     }
+    void effectIntervalsAreBoundedAndNeverCoverGapsOrOccupiedAudio()
+    {
+        auto spec = musicSpec();
+        spec.remove("recipe");
+        spec["start_frame"] = 30;
+        spec["duration_frames"] = 60;
+        QVERIFY(Montaz::validateEffectRequest(musicSnapshot(), spec).isEmpty());
+        auto result = soundtrack();
+        result["start_frame"] = 30;
+        result["duration_frames"] = 60;
+        result["accents"] = QJsonArray{};
+        QVERIFY(Montaz::validateSoundtrack(musicSnapshot(), spec, result, true).isEmpty());
+        for (const auto &change : {QJsonObject{{"start_frame", 19}}, QJsonObject{{"duration_frames", 14}}, QJsonObject{{"duration_frames", 301}},
+                                   QJsonObject{{"instruction", " "}}, QJsonObject{{"track_id", "1"}}, QJsonObject{{"recipe", "postcard"}}}) {
+            auto invalid = spec;
+            for (auto it = change.begin(); it != change.end(); ++it)
+                invalid[it.key()] = it.value();
+            QVERIFY(!Montaz::validateEffectRequest(musicSnapshot(), invalid).isEmpty());
+        }
+        auto occupied = musicSnapshot();
+        auto ranges = occupied["occupied"].toArray();
+        ranges.append(QJsonObject{{"instance_id", "sound"}, {"track_id", "2"}, {"start_frame", 89}, {"duration_frames", 1}});
+        occupied["occupied"] = ranges;
+        QVERIFY(!Montaz::validateEffectRequest(occupied, spec).isEmpty());
+        result["accents"] = QJsonArray{15};
+        QVERIFY(!Montaz::validateSoundtrack(musicSnapshot(), spec, result, true).isEmpty());
+        result["accents"] = QJsonArray{};
+        result["start_frame"] = 31;
+        QVERIFY(!Montaz::validateSoundtrack(musicSnapshot(), spec, result, true).isEmpty());
+    }
     void musicRequiresOrderedProgressMatchingResultAndCleanExit()
     {
         const QByteArray script = R"PY(import json,sys,signal,time
@@ -254,36 +284,44 @@ CHANGE
 send({'type':'soundtrack','soundtrack':p})
 EXIT
 )PY";
-        for (int fault = 0; fault < 5; ++fault) {
-            QTemporaryDir temp;
-            auto worker = script;
-            worker.replace("FAULT", fault == 3   ? "send({'type':'music_progress','phase':'generation','model':'music_v2_5','cached':False})"
-                                    : fault == 4 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)"
-                                                 : "pass");
-            worker.replace("CHANGE", fault == 1 ? "p['path']='/unissued.wav'" : "pass");
-            worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
-            fakeWorker(temp.path(), worker);
-            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
-            QSignalSpy ready(&client, &Montaz::WorkerClient::soundtrackReady), failures(&client, &Montaz::WorkerClient::failed),
-                stopped(&client, &Montaz::WorkerClient::stopped), events(&client, &Montaz::WorkerClient::eventReceived);
-            QVERIFY(client.start(musicSnapshot(), {{"music", musicSpec()}}));
-            if (fault == 4) {
-                QTRY_COMPARE_WITH_TIMEOUT(events.count(), 3, 3000);
-                client.stop();
+        for (const bool effect : {false, true})
+            for (int fault = 0; fault < 5; ++fault) {
+                QTemporaryDir temp;
+                auto worker = script;
+                if (effect) {
+                    worker.replace("'music'", "'effect'");
+                    worker.replace("music_v2_5", "eleven_text_to_sound_v2");
+                    worker.replace("accents=[15,60]", "accents=[]");
+                }
+                worker.replace("FAULT", fault == 3   ? "send({'type':'music_progress','phase':'generation','model':'music_v2_5','cached':False})"
+                                        : fault == 4 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)"
+                                                     : "pass");
+                worker.replace("CHANGE", fault == 1 ? "p['path']='/unissued.wav'" : "pass");
+                worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
+                fakeWorker(temp.path(), worker);
+                Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+                QSignalSpy ready(&client, &Montaz::WorkerClient::soundtrackReady), failures(&client, &Montaz::WorkerClient::failed),
+                    stopped(&client, &Montaz::WorkerClient::stopped), events(&client, &Montaz::WorkerClient::eventReceived);
+                auto spec = musicSpec();
+                if (effect) spec.remove("recipe");
+                QVERIFY(client.start(musicSnapshot(), {{effect ? "effect" : "music", spec}}));
+                if (fault == 4) {
+                    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 3, 3000);
+                    client.stop();
+                }
+                QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+                QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
+                QCOMPARE(failures.count(), fault > 0 && fault != 4 ? 1 : 0);
+                QCOMPARE(stopped.count(), fault == 4 ? 1 : 0);
+                const auto logs = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+                for (const auto &name : QDir(logs).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+                    QFile file(logs + name);
+                    QVERIFY(file.open(QIODevice::ReadOnly));
+                    const auto bytes = file.readAll();
+                    QVERIFY(!bytes.contains("project.assets"));
+                    QVERIFY(!bytes.contains("private editorial brief"));
+                }
             }
-            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
-            QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
-            QCOMPARE(failures.count(), fault > 0 && fault != 4 ? 1 : 0);
-            QCOMPARE(stopped.count(), fault == 4 ? 1 : 0);
-            const auto logs = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
-            for (const auto &name : QDir(logs).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
-                QFile file(logs + name);
-                QVERIFY(file.open(QIODevice::ReadOnly));
-                const auto bytes = file.readAll();
-                QVERIFY(!bytes.contains("project.assets"));
-                QVERIFY(!bytes.contains("private editorial brief"));
-            }
-        }
     }
     void editorialReviewCannotInventShotsOrMisstateDuration()
     {

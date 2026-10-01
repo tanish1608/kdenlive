@@ -24,7 +24,8 @@ public:
     QJsonObject timingRequest();
     QString applyTiming(const QJsonObject &snapshot, const QJsonObject &timing, const QJsonObject &proposal);
     QJsonObject musicRequest(const QString &recipe, const QString &instruction);
-    QString applySoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack);
+    QJsonObject effectRequest(const QString &instruction, int durationFrames);
+    QString applySoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack, bool effect = false);
     QString apply(const QJsonObject &proposal);
 
 Q_SIGNALS:

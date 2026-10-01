@@ -119,6 +119,32 @@ measured in project frames; they are not verified beats. Adding music keeps cuts
 unchanged; the separate Align cuts review can propose bounded shifts.
 Music preview uses Qt audio; Kdenlive remains the timeline playback authority.
 
+## Occasional sound effects
+
+**Add sound** asks for one description and a 0.5–10 second duration. Put the
+playhead inside a shot first. The editor captures that position, limits the sound
+to the shot and chooses a free unlocked audio track. Review its position and
+Listen before **Apply sound**. One native Undo removes both clip and imported
+asset; existing audio and video stay unchanged. Align cuts before adding effects;
+additional audio makes the conservative timing refinement ineligible.
+
+The dedicated ElevenLabs `eleven_text_to_sound_v2` endpoint uses the same private
+API key. It requests no looping, voices or music. Raw responses persist before
+preparation; repeated descriptions/durations reuse local audio without automatic
+regeneration. Durable owner-only WAV/MP3 files live beside the saved project in
+`<project>.assets/effects/`; keep that directory with the project. Audio is prepared
+at -26 LUFS with soft edges and exact project-frame duration. Larger shortfalls
+and silence are rejected; only a final shortfall within one project frame may
+be padded. Native validation binds path, checksum, revision, interval and track.
+
+This is explicit described-sound generation, not automatic event recognition or
+an autonomous sound-design pass. Stop discards late results and terminates local
+processing; an already submitted provider request may still complete. There is
+one bounded generation request with no automatic network retry. Provider timeout
+is 60 seconds and the entire native request has a three-minute deadline.
+
+API reference: [Create sound effect](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert).
+
 ## Local cut timing
 
 With assistant music on the timeline, **Align cuts** proposes small changes to

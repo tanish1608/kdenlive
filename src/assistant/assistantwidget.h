@@ -27,6 +27,7 @@ public:
 private:
     void clearProposal();
     void composeMusic();
+    void composeEffect();
     void refineTiming();
     void planEdit(const QString &message);
     void reply(const QString &message);
@@ -39,6 +40,7 @@ private:
     QLabel *m_shotReason;
     QListWidget *m_preview;
     QPushButton *m_music;
+    QPushButton *m_effect;
     QPushButton *m_align;
     bool m_timingMode{false};
     QJsonObject m_timingSpec;
@@ -46,6 +48,7 @@ private:
     QPushButton *m_listen;
     QMediaPlayer *m_audioPreview;
     bool m_musicMode{false};
+    bool m_effectMode{false};
     QJsonObject m_musicSpec;
     QJsonObject m_soundtrack;
     QPushButton *m_plan;

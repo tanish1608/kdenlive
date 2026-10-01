@@ -104,3 +104,28 @@ plus native `assistanttest`, pass. The native synthetic test verifies actual
 resize/move, one Undo/Redo, stable identities/source starts, replay rejection,
 stale locks and rollback after an injected batch failure. Those checks establish
 mutation safety; they do not assess musical or visual taste.
+
+
+## Described sound checkpoint
+
+The separate `goa-sound-review.kdenlive` keeps the timing edit and instrumental
+and adds one explicitly described coastal-wave effect at frame **79**, lasting
+**60 frames / 2.002 seconds** on the previously free audio track. This is generated
+foley, not recovered location audio or automatically recognized sound evidence.
+The dedicated ElevenLabs effect request completed; local preparation produced
+96,096 stereo samples at 48 kHz, measured **-26.0 LUFS / -13.2 dBFS** true peak.
+
+Qt preview completed, native Apply added one audio asset/clip, and one Undo removed
+only that sound. Redo and save/reopen retained both the effect and existing music.
+The saved effect resource is relative to `goa-sound-review.assets/effects/`. Keep
+that folder and the referenced `goa-music-review.assets/music/` with this project.
+No source video, earlier project or export was overwritten.
+
+Native export `~/Movies/goa-sound-review.mp4` retains all **474 decoded video
+frames exactly** from the timing review. The H.264/AAC mix measures **-18.0 LUFS /
+-4.7 dBFS** true peak, with no clipping. It remains a pillarboxed editorial
+prototype; signal measurements do not establish perceptual sound-design quality.
+
+92 Python checks, 27 Qt transport checks and 7 chat checks (including fixtures),
+plus native `assistanttest`, pass. Automatic cue selection, source-audio pairing,
+ducking and narration/captions remain pending; portrait framing remains deferred.

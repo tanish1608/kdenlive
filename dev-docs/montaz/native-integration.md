@@ -161,3 +161,22 @@ verification and sound effects remain pending.
 The live Goa review proposed only frame 75 → 79 and exercised Apply, one Undo,
 Redo, save/reopen, native cut seeking, terminal no-change and export. The export retains 474 video frames
 and identical decoded audio. See [quality review](quality-review.md).
+
+
+The described-sound milestone passes **92 Python checks**, **27 Qt transport
+checks** and **7 chat checks** (including fixtures), plus native `assistanttest`.
+Synthetic checks cover the actual worker with encoded audio, quiet preparation,
+exact duration, raw/prepared reuse, silence/shortfall rejection, occupied/locked
+tracks, gaps, provider failures and Stop. The transport's clean-exit, dirty-exit,
+malformed-result and uncooperative-Stop matrix now covers both music and effects.
+Native generated-audio tests exercise music and short effects, exact insertion,
+role markers, stable video, one Undo/Redo, changed-file rejection and stale locks.
+The effect uses the same native import/undo implementation as music; no second
+audio engine or timeline is introduced.
+
+Live Goa checks exercised the dedicated provider endpoint, preview completion,
+Apply/Undo/Redo, relative effect resources, save/reopen and native export. The
+60-frame sound starts at frame 79 and leaves all 474 exported video frames
+unchanged. The mixed export measures -18.0 LUFS / -4.7 dBFS true peak. The user
+still chooses the sound and position explicitly; this is not automatic sound
+design, verified sound-event recognition, ducking or caption generation.
