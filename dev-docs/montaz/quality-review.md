@@ -219,8 +219,8 @@ endings or finished-film quality; the model keeping a draft is not approval.
 Desktop testing used a copied `goa-editorial-review.kdenlive` with a separate empty
 sequence. The full-bin request failed in analysis with `invalid_model_response`
 before reaching review. AX inspection then reproduced the known accessibility
-crash. The current saved fixture retains the earlier sequence and empty test
-sequence; successful review/Apply/export in the desktop remains an open gate.
+crash. At that checkpoint the saved fixture retained the earlier sequence and
+empty test sequence; successful desktop review/Apply/export remained an open gate.
 No new finished travel video or perceptual improvement is claimed.
 
 127 Python, 34 Qt transport and 7 chat checks, plus native `assistanttest`, pass.
@@ -228,3 +228,45 @@ Tests cover invalid revisions/approval claims, exact duration, cached planning,
 failed review, clean exits, progress order, redaction and cancellation during an
 unresponsive review. Replacing a finished edit and mixed-media perceptual review
 remain pending; private fixtures and diagnostic outputs stay outside Git.
+
+## Full-bin desktop review checkpoint
+
+The original full-bin cache discrepancy was caused by seven converted resources
+with different content hashes, sometimes lengths. The originals retain valid
+entries. Reanalysis completed in **20.65 seconds** with five hits, seven new
+entries and three micro-clips skipped. No content identity checks were bypassed.
+The earlier generic provider failure cannot be reconstructed from its old code;
+new terminal diagnoses distinguish output limits, blocked/empty answers and
+rejected requests without logging private response bodies.
+
+A separate Qt tree/list application reproduced the accessibility crash. The
+upstream QTBUG-149612 ownership patch, built as a scoped development Cocoa plugin,
+retains selected rows and survives list replacement. Real Kdenlive inspection now
+passes after planning, Apply/Undo/Redo and closing Rendering. The reproducible
+builder checks source digests and the exact Qt SDK/plugin identity; the launcher
+only opts in with `MONTAZ_COCOA_PLUGIN_ROOT`. The global Craft plugin is unchanged.
+
+The empty `Coastal editorial review` sequence received a three-shot draft in
+**20.21 seconds**, reusing all twelve eligible entries. One review kept it; Stop
+was disabled after completion and no task remained Working. Native Apply inserted
+the draft as one Undo/Redo action. Saving and launching a fresh editor preserved
+the three source ranges and the earlier 474-frame sequence. The fresh session
+correctly reset conversation/proposal state. Native seeking at frame **75** shows
+the pool shot, matching the exported first cut.
+
+Native Rendering completed in **11 seconds**. `~/Movies/goa-editorial-review.mp4`
+contains exactly **240 H.264 frames / 8.008 seconds**, 1920×1080 at 30000/1001 FPS.
+First/last frames and both sides of cuts at **75 and 126** contain source imagery;
+black detection finds no added blank frames. This draft is video-only, with no
+speech/narration. Portrait pillarboxing remains deferred.
+
+**Quality limitation:** the brief requested 20 seconds, the feasible estimate was
+708 frames (~23.62 seconds), yet the draft selected only 240. The model's kept
+assessment does not establish that this is a good finished film. Purposeful
+duration, richer travel coverage and a resolved ending still need measured
+comparison. Existing-sequence refinement and structured recipe improvements are
+the next editorial gates; do not present this export as a quality benchmark.
+
+132 Python, 35 Qt transport, 7 chat checks and native `assistanttest` pass. The
+editor and scoped plugin compile. Plugin identity regressions reject changed SDK
+binaries even at the same version, changed architecture/location, patch or plugin.

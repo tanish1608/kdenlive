@@ -79,6 +79,15 @@ all project-switch/relink/profile interactions, and linked audio. The feature
 remains off by default. A Qt accessibility crash occurred while inspecting a
 closing file dialog; this is an unresolved SDK/UI automation limitation.
 
+October 1 update: the crash reproduces in a standalone standard Qt tree/list
+app. Qt's synthesized Cocoa table elements can delete their parent's accessible
+interface (QTBUG-149612). A scoped, optional development backport now builds and
+passes repeated selected-row/list-replacement queries and native
+planning/review/Apply/Undo/Redo/save/reopen/render checks. See
+[local dependency fix](../../assistant/tools/qt-cocoa/README.md) for the pinned
+source, upstream patch provenance and launcher instructions. Craft's installed
+plugin remains unchanged; this is not a packaged or released Qt dependency fix.
+
 The Gemini milestone adds 55 Python checks and 20 Qt transport checks (including
 fixtures). Live synthetic runs verified analysis reuse and bounded proposals.
 The desktop exercised Gemini planning/Apply, duration shortfall, Stop and retry.

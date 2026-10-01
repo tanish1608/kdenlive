@@ -11,6 +11,15 @@ source "$montaz_craft_root/craft/craftenv.sh"
 cb kdenlive
 set -u
 
+# Optional, version-checked development workaround for QTBUG-149612.
+# Craft's environment resets QT_PLUGIN_PATH, so prepend only after sourcing it.
+if [[ -n "${MONTAZ_COCOA_PLUGIN_ROOT:-}" ]]; then
+    "$CRAFT_PYTHON_BIN" "$montaz_source_root/assistant/tools/build_cocoa_accessibility_fix.py" \
+        --validate --craft-root "$montaz_craft_root" --root "$MONTAZ_COCOA_PLUGIN_ROOT"
+    export QT_PLUGIN_PATH="$MONTAZ_COCOA_PLUGIN_ROOT${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+    echo "Using the local Qt Cocoa accessibility fix."
+fi
+
 "$CRAFT_PYTHON_BIN" "$montaz_source_root/assistant/tools/prepare_craft_macos.py" "$PWD/bin/kdenlive.app"
 
 # These are development SDK paths, not the eventual packaged app layout.

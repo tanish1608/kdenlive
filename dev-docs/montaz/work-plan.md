@@ -102,9 +102,10 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    review, at most one same-duration revision, strict original plan validation,
    explicit unavailable states and bounded Stop/deadlines are implemented.
    Offline tests cover failed/invalid reviews, cancellation, native progress and
-   privacy. Controlled cached-Goa planning/review succeeded. Desktop inspection
-   reproduced the known macOS accessibility crash; successful desktop review/
-   Apply/export remains an open gate. Finished-sequence replacement, mixed-media
+   privacy. Full-bin cached-Goa planning/review and desktop Apply/Undo/save/reopen/
+   export now pass with a scoped upstream Qt Cocoa ownership backport. The
+   three-shot/240-frame draft still undershoots a feasible 20-second brief; these
+   checks establish integration, not film quality. Finished-sequence replacement, mixed-media
    perceptual review and measured quality comparison remain pending. Publication
    comes later.
 

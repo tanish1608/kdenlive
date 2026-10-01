@@ -259,5 +259,22 @@ generic model failure, which cannot be reconstructed from the old logs.
 A standalone Qt tree/list app reproduces the selected-children macOS crash at
 the same Cocoa plugin offset as Kdenlive. Upstream QTBUG-149612/change 765434
 addresses synthesized table elements incorrectly deleting the parent interface.
-A scoped development plugin build is being evaluated; no UI workaround or global
-Craft dependency replacement has been committed.
+A scoped development plugin backport now builds reproducibly and passes native
+selected-row/list-replacement checks. The opt-in launcher verifies source/patch,
+Qt SDK version/architecture/location and SDK/plugin binary hashes. Craft's global
+plugin remains intact. See `assistant/tools/qt-cocoa/README.md`; this is an
+under-review upstream patch, not an officially released Qt dependency fix.
+
+The full-bin native planning/review completed in 20.21 seconds with twelve cache
+hits and a kept three-shot/240-frame draft. Desktop Apply/one Undo/Redo, save and
+fresh-instance reopening pass. Native Rendering finished in 11 seconds; output
+is exactly 240 frames/8.008 seconds at 30000/1001 FPS. First/last and both sides of
+cuts at 75/126 contain imagery, with no added black frames. Native seeking at 75
+matches the exported pool shot. The earlier 474-frame sequence is preserved.
+132 Python, 35 Qt transport, 7 chat tests and native `assistanttest` pass.
+
+The draft still undershoots its 20-second brief despite a 708-frame feasible
+estimate. This is an integration checkpoint, not evidence of improved film
+quality. Native existing-edit replacement/refinement, explicit recipe coverage,
+perceptual comparison and narration/ducking remain pending. Portrait framing and
+packaging/publication remain deferred.
