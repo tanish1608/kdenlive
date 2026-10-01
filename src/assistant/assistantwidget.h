@@ -9,12 +9,14 @@ class QLabel;
 class QListWidget;
 class QPushButton;
 class QComboBox;
-class QLineEdit;
+class QGroupBox;
+class QTreeWidget;
 class QSpinBox;
 
 namespace Montaz {
 class EditorAdapter;
 class WorkerClient;
+class ChatView;
 
 class AssistantWidget : public QWidget
 {
@@ -23,6 +25,11 @@ public:
 
 private:
     void clearProposal();
+    void planEdit(const QString &message);
+    void reply(const QString &message);
+    void resetConversation();
+    void setTask(int row, const QString &status);
+    void finishTasks(const QString &status);
     EditorAdapter *m_adapter;
     WorkerClient *m_worker;
     QLabel *m_status;
@@ -30,9 +37,16 @@ private:
     QPushButton *m_plan;
     QPushButton *m_stop;
     QPushButton *m_apply;
+    QPushButton *m_newBrief;
     QComboBox *m_recipe;
-    QLineEdit *m_instruction;
+    ChatView *m_chat;
+    QGroupBox *m_previewCard;
+    QTreeWidget *m_tasks;
     QSpinBox *m_duration;
+    QString m_contextKey;
+    QString m_brief;
+    int m_activeTask{-1};
+    bool m_applying{false};
     int m_requestedSeconds{0};
     QJsonObject m_snapshot;
     QJsonObject m_proposal;

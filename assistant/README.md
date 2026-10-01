@@ -35,6 +35,12 @@ with two frames per window. Gemini describes only these observations, then choos
 source windows and cut lengths. This is sampled visual analysis, not complete video
 understanding or speech transcription. The current edit inserts video only.
 
+The native **AI** button opens a chat dock using Kdenlive's actions and palette.
+Enter sends; Shift+Enter adds a line. Follow-up messages refine the active brief,
+and **New brief** resets it. Conversations are bounded, session-only and cleared
+when the project/sequence changes. A task list tracks actual analysis, planning,
+review and application; reviewing a proposal is not a background job.
+
 Set `GEMINI_API_KEY` and optionally `GEMINI_MODEL`, or use the private settings file
 `~/.config/montaz/assistant.json` with `gemini_api_key` and `gemini_model` fields.
 Keep it owner-readable/writable (`chmod 600`); never add it to the repository.
@@ -47,11 +53,16 @@ duration, and rational FPS. A renamed or re-imported source reuses its evidence.
 Two videos are analyzed concurrently; identical content shares one analysis even
 when imported twice. Cache writes are atomic and owner-only. Failed analysis is
 never a valid cache entry. The brief and recipe do not invalidate visual evidence.
+Sampling v3 probes the video stream duration separately from audio/container
+duration, bounds candidate windows to visible video, and places the second sample
+90% inside each window. This avoids empty tail samples from short phone clips.
 
 Plans reject duplicate content, unknown windows, poor-quality observations,
 source overflow, unreasonable cut durations, and excess requested duration.
 Shorter edits are explicitly reported; footage is never stretched or repeated to
 fill a brief. Missing keys and provider/parse failures stop the run before Apply.
+Travel cuts below one second are rejected. The planner gets a feasible target
+from distinct usable windows, rather than only a maximum requested duration.
 There is no permissive critic fallback or caption job on silent footage.
 
 Stop kills owned FFmpeg children and terminates the worker with a 750 ms grace

@@ -18,6 +18,7 @@ class EditorAdapter : public QObject
 public:
     explicit EditorAdapter(QObject *parent = nullptr);
     void refreshContext();
+    QString contextKey();
     QJsonObject snapshot();
     QJsonObject mediaSources(const QJsonObject &snapshot);
     QString apply(const QJsonObject &proposal);

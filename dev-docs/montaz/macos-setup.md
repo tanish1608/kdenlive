@@ -135,7 +135,7 @@ PYTHONPATH=assistant/src "$KDENLIVE_ASSISTANT_PYTHON" \
 ```
 
 In the editor, open **View → AI Assistant**, import a few small videos, open a
-sequence, enter a brief, choose a travel preset and duration, then **Plan edit**.
+sequence, open **AI**, choose a travel preset and duration, then send a chat brief.
 Inspect the list before **Apply edit**. Gemini uses a private settings file or
 `GEMINI_API_KEY`; see [assistant configuration](../../assistant/README.md).
 The current planner creates video-only cuts; narration, sound and captions follow

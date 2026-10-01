@@ -2,12 +2,14 @@
 # SPDX-FileCopyrightText: 2026 Montaz contributors
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
 from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -36,16 +38,26 @@ class PlanningTests(unittest.TestCase):
         self.snapshot = Snapshot(
             "project", "sequence", 1, self.rate, (self.asset,), (Track("1", "video"),)
         )
-        self.brief = {"duration_seconds": 60, "recipe": "postcard", "instruction": "Beach trip"}
+        self.brief = {
+            "duration_seconds": 60,
+            "recipe": "postcard",
+            "instruction": "Beach trip",
+        }
         self.observation = {
             "windows": [
-                {"window_id": 0, "description": "A red test image", "role": "other", "quality": 80}
+                {
+                    "window_id": 0,
+                    "description": "A red test image",
+                    "role": "other",
+                    "quality": 80,
+                }
             ]
         }
         self.provider = Mock(model="test-model")
         self.provider.generate.return_value = self.observation
         self.media = MediaTools()
         self.media.image = Mock(return_value={"text": "synthetic frame"})
+        self.media.visual_frames = Mock(side_effect=lambda path, rate, maximum: maximum)
 
     def analysis(self, **changes):
         values = dict(
@@ -112,9 +124,49 @@ class PlanningTests(unittest.TestCase):
         self.assertFalse(hit)
         self.assertEqual(self.provider.generate.call_count, 2)
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is required for the media regression")
+    def test_audio_tail_does_not_break_visual_analysis(self):
+        # The muxed asset extends beyond the last video frame, as real phone clips can.
+        subprocess.run(
+            [
+                shutil.which("ffmpeg"),
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=25:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1.08",
+                "-c:v",
+                "mpeg4",
+                "-c:a",
+                "aac",
+                "-threads",
+                "1",
+                str(self.path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        media = MediaTools()
+        with self.assertRaisesRegex(AssistantError, "media_unreadable"):
+            media.image(self.path, Fraction(26, 25))
+        result, hit = self.analysis(asset=replace(self.asset, duration_frames=27), media=media)
+        self.assertFalse(hit)
+        self.assertEqual(result[0]["duration_frames"], 25)
+
     def test_short_sources_produce_a_feasible_plan_without_repetition(self):
         evidence = {
-            "1": [{**candidates(self.asset, self.rate)[0], **self.observation["windows"][0]}]
+            "1": [
+                {
+                    **candidates(self.asset, self.rate)[0],
+                    **self.observation["windows"][0],
+                }
+            ]
         }
         proposal = proposal_from_plan(
             self.snapshot,
@@ -126,9 +178,44 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(len(proposal.operations), 1)
         self.assertEqual(proposal.operations[0].duration_frames, 50)
 
+    def test_subsecond_travel_cuts_are_rejected(self):
+        asset = replace(self.asset, duration_frames=12)
+        evidence = {"1": [{**candidates(asset, self.rate)[0], **self.observation["windows"][0]}]}
+        with self.assertRaisesRegex(AssistantError, "invalid_plan"):
+            proposal_from_plan(
+                replace(self.snapshot, assets=(asset,)),
+                "r",
+                {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 12}]},
+                evidence,
+                self.brief,
+            )
+
+    def test_planner_receives_feasible_target_instead_of_only_a_duration_cap(self):
+        self.provider.generate.side_effect = [
+            self.observation,
+            {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 50}]},
+        ]
+        plan_media(
+            self.snapshot,
+            "r",
+            {"1": str(self.path)},
+            self.brief,
+            self.root / "cache",
+            self.provider,
+            self.media,
+            lambda *_: None,
+        )
+        prompt = self.provider.generate.call_args.args[0][0]["text"]
+        self.assertIn("feasible target from distinct usable windows is 50 frames", prompt)
+
     def test_duplicate_unknown_unusable_or_excessive_shots_are_rejected(self):
         evidence = {
-            "1": [{**candidates(self.asset, self.rate)[0], **self.observation["windows"][0]}]
+            "1": [
+                {
+                    **candidates(self.asset, self.rate)[0],
+                    **self.observation["windows"][0],
+                }
+            ]
         }
         shot = {"bin_id": "1", "window_id": 0, "duration_frames": 50}
         invalid = [
@@ -233,7 +320,11 @@ class PlanningTests(unittest.TestCase):
             "sources": {"1": "private-path"},
             "brief": self.brief,
         }
-        env = dict(os.environ, GEMINI_API_KEY="", MONTAZ_ASSISTANT_CONFIG=str(self.root / "empty"))
+        env = dict(
+            os.environ,
+            GEMINI_API_KEY="",
+            MONTAZ_ASSISTANT_CONFIG=str(self.root / "empty"),
+        )
         result = subprocess.run(
             [sys.executable, "-m", "montaz_assistant.worker"],
             input=encode(request),

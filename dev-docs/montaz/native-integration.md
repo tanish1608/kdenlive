@@ -12,7 +12,7 @@ unlocked video track. See `assistant/README.md` for sampling and provider limits
 The deterministic six-source diagnostic remains available by setting
 `MONTAZ_ASSISTANT_DEMO=1`; it appends each source's first two seconds.
 Audio, captions, transitions, generators, and nested sequences are outside this
-first slice. No provider credentials are needed.
+first slice. Only the deterministic diagnostic runs without provider credentials.
 
 The editor adapter captures the actual bin/sequence, uses a monotonically
 increasing revision, rejects stale/replayed proposals, and revalidates source
@@ -34,8 +34,12 @@ ctest --test-dir build -R assistanttest --output-on-failure
 
 Launch the built editor with Python 3.11+ on PATH. If needed, set
 `KDENLIVE_ASSISTANT_PYTHON` to an absolute interpreter path. Open the AI Assistant
-dock through the normal View menu. Import six small videos, select a sequence,
-enter a brief, choose **Plan edit**, inspect the list, and choose **Apply edit**.
+dock through the **AI** toolbar action or normal View menu. Import small videos,
+select a sequence, enter a chat message and choose **Send** (or Enter). Inspect
+the proposed shots and choose **Apply edit**. Shift+Enter adds a line. Follow-up
+messages refine the current brief; **New brief** starts over. Conversations are
+session-only and clear on project/sequence changes. The edit task list uses actual
+worker progress and native application results; pending review has no running job.
 This development build reads the Python package from this checkout's source
 directory. Relocatable worker installation belongs to later distribution work.
 
@@ -87,3 +91,12 @@ Before connecting providers, pass `assistanttest` and manually check:
 
 Add native failure-injection and save/reopen/export tests when the full build is
 available. Keep the diagnostic feature disabled until these gates pass.
+
+
+The October 1 chat milestone passes 58 Python checks and 27 Qt transport/chat
+checks (including fixtures), plus native `assistanttest`. Live Goa checks used
+fifteen supplied clips, verified analysis reuse, a four-shot baseline and an
+eight-shot refined draft, Apply/Undo/Redo, first-cut seeking, Stop and project
+conversation reset. The brief refinements stay within the 2,000-character worker
+contract; oversized drafts are retained and explained. These remain sampled
+visual edits, not verified final films with framing, audio or captions.

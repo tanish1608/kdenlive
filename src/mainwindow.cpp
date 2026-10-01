@@ -499,9 +499,14 @@ void MainWindow::init()
     m_undoViewDock = addDock(i18n("Undo History"), QStringLiteral("undo_history"), m_undoView, KDDockWidgets::Location_None, m_projectBinDock);
 
 #ifdef MONTAZ_ASSISTANT_ENABLED
-    auto assistantDock = addDock(i18n("AI Assistant"), QStringLiteral("montaz_assistant"), new Montaz::AssistantWidget(),
-                                 KDDockWidgets::Location_None, m_projectBinDock);
+    auto assistantDock = addDock(i18n("AI Assistant"), QStringLiteral("montaz_assistant"), new Montaz::AssistantWidget(), KDDockWidgets::Location_OnRight,
+                                 nullptr, QSize(380, 600));
     assistantDock->close();
+    auto assistantAction = actionCollection()->action(QStringLiteral("raise_montaz_assistant"));
+    assistantAction->setText(i18n("AI Assistant"));
+    assistantAction->setIconText(i18n("AI"));
+    assistantAction->setIcon(QIcon::fromTheme(QStringLiteral("tools-wizard")));
+    assistantAction->setToolTip(i18n("Open the AI editing assistant"));
 #endif
 
     connect(m_commandStack, &QUndoGroup::cleanChanged, [this, cleanHistory](bool isClean) {
@@ -638,6 +643,9 @@ void MainWindow::init()
 
     // Since not all widgets are added yet, don't use the Save flag now
     setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::StatusBar | KXmlGuiWindow::Create);
+#ifdef MONTAZ_ASSISTANT_ENABLED
+    if (!toolBar()->actions().contains(assistantAction)) toolBar()->addAction(assistantAction);
+#endif
 
     // Remove secondary cut shortcut conflicting with extract action
     QAction *officialCut = actionCollection()->action(KStandardAction::name(KStandardAction::Cut));

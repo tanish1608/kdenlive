@@ -70,6 +70,14 @@ void Montaz::EditorAdapter::refreshContext()
     bind();
 }
 
+QString Montaz::EditorAdapter::contextKey()
+{
+    bind();
+    const auto timeline = m_timeline.lock();
+    if (!m_document || !timeline) return {};
+    return m_document->uuid().toString(QUuid::WithoutBraces) + QLatin1Char('/') + timeline->uuid().toString(QUuid::WithoutBraces);
+}
+
 QJsonObject Montaz::EditorAdapter::snapshot()
 {
     if (QThread::currentThread() != thread()) return {};

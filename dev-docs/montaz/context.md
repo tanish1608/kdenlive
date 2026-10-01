@@ -102,3 +102,24 @@ analyses cached on retry), each proposing 225 frames at 25 fps. Desktop Plan/App
 Stop, cached retry, and duration-shortfall reporting were exercised. Narration,
 ElevenLabs music/effects, captions, full temporal analysis and quality review remain
 open; do not describe this first visual planner as a completed production editor.
+
+
+On October 1 the user supplied fifteen Goa test clips and requested a native AI
+button, clean chat interface and an implementation checklist before continuing.
+The dock now uses Kdenlive's existing actions/palette and provides multiline
+messages, contextual brief refinements, session-only project isolation, actual
+edit task statuses, readable shot previews, Apply, Stop and run logs. Opening a
+new project cleared the previous conversation in the actual editor.
+
+Testing the real clips exposed empty boundary samples: one source's video stream
+ends at 0.667 s but its audio/container ends at 0.810 s. The worker now bounds
+visual windows to video stream duration and samples inside each window, with a
+new cache version and synthetic regression. Fifteen observations were obtained;
+the first valid four-shot draft lasted 9.48 s. Feasible-duration guidance and a
+refinement produced eight shots totaling 535 frames (17.85 s at 30000/1001 fps),
+with all fifteen analyses cached. The initial successful run took 49.16 s; the
+cached refinement took 23.15 s. This comparison also changes the brief and is not
+a controlled editorial-quality benchmark. Sub-second travel cuts are rejected.
+Native Apply/Undo/Redo, first-cut seeking, saving, Stop and conversation reset were
+exercised. Mixed-orientation framing, audio, temporal evidence, shot rationale and
+exported output remain open. See work-plan.md for the staged checklist.

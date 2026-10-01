@@ -85,6 +85,11 @@ concurrency and a content-addressed observations cache. It samples two frames in
 each first/middle/last six-second window. Model observations are explicitly
 limited to those samples; full temporal analysis, speech, music/beat alignment,
 framing, transitions and subtitle style operations are not implemented yet.
+The worker probes video stream length before sampling: audio/container tails must
+not become selectable visual footage. Samples use each window's start and an
+interior late frame (90%). Cache sampling version is `visual-windows-3`. Travel
+plans reject sub-second cuts and receive a duration target from usable unique
+windows. This is guidance, not a guarantee that the model fills every usable shot.
 
 ## Runs and cancellation
 
@@ -107,7 +112,8 @@ from structured and text logs. Footage/transcripts are project data, not telemet
 The diagnostic implementation records timestamps, run/stage outcomes, revision,
 asset count, and apply result in the application's cache at `montaz/runs/*.jsonl`.
 It does not record bin paths, source text, environment variables, worker stderr,
-or free-form event reasons. Provider/cache metrics and log retention are pending.
+or free-form event reasons. Provider/model/cache progress is now recorded; log
+retention and editorial quality metrics remain pending.
 
 ## Native integration locations
 

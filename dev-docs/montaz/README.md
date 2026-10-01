@@ -14,6 +14,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 3. [Assistant foundation](../../assistant/README.md): implemented contracts and tests.
 4. [Upstream build guide](../build.md): native toolchain requirements.
 5. [macOS setup](macos-setup.md): beginner instructions for dependencies, build, and launch.
+6. [Implementation checklist](work-plan.md): chat milestone and footage-quality gates.
 
 ## Current state
 
@@ -26,6 +27,10 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Gemini visual analysis/planning now drives the dock: brief, requested duration,
   travel postcard/adventure/diary pacing, content-addressed evidence caching,
   two-video concurrency, provider errors, Stop, and a run-log shortcut.
+- A native AI toolbar action opens a chat dock. Send or Enter requests a plan;
+  Shift+Enter inserts a line. Refinements reuse the current brief, New brief
+  clears it, and changing project/sequence clears session-only conversation.
+  The task list distinguishes active work, review, Stop, failure and application.
 - Compiled and exercised behind `BUILD_MONTAZ_ASSISTANT=ON`:
   dock, sequence snapshot/revision bridge, proposal list, and undoable application
   through Kdenlive's own insertion API. It is disabled in default builds.

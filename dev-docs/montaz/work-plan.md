@@ -1,0 +1,73 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2026 Montaz contributors -->
+
+# Assistant implementation plan — October 1, 2026
+
+## Goal and boundaries
+
+Build a practical travel editing assistant inside Kdenlive. Use its docks,
+actions, palette, project bin, timeline, playback and undo. Keep Gemini for footage
+understanding. Packaging and publication remain deferred. Chat creates reviewed
+edit proposals; messages never directly execute code or modify project files.
+
+## Current milestone: native chat
+
+- [x] Add an AI toolbar action using Kdenlive's existing dock action system.
+- [x] Replace the form with a conversation, multiline composer, Send and Stop.
+- [x] Keep refinements within the active project/sequence; New brief clears them.
+- [x] Show a task list driven by real analysis/planning/application events.
+- [x] Present filenames and durations; apply only the current reviewed proposal.
+- [x] Compile, exercise the interface, test cancellation and project isolation.
+
+Conversations are bounded and session-only. Secrets, prompts and source filenames
+stay out of run logs. A pending review is visibly distinct from background work;
+Stop, failure and invalidation leave no task marked as working.
+
+## Real-footage checkpoint
+
+Use the user-supplied `~/Downloads/goa-clips-test` outside version control in a
+separate test project. Fifteen clips contain approximately **30.81 seconds** total,
+including portrait/landscape, variable frame rates and sub-second shots. A
+60-second request cannot be fulfilled without repetition or generated material.
+
+- [x] Run Gemini on all clips and verify reuse on a second brief.
+- [x] Review visible observations, selected source windows, sequence and durations.
+- [x] Check the native preview, apply/undo, exact cut seeking and save/reopen.
+- [x] Identify abrupt-cut and framing problems before expanding edit operations.
+
+## Findings and completed fixes
+
+- Video stream length can be shorter than audio/container length. Sampling v3
+  probes visual duration, bounds candidate windows, and avoids boundary samples.
+  The corrected sampler decoded all fifteen sources; a synthetic audio-tail
+  regression exercises the same failure without committing private footage.
+- The first valid draft used four scenic shots (9.48 seconds). Feasible-target
+  guidance plus a chat refinement produced eight shots (17.85 seconds). All
+  fifteen analyses were reused; the repeated run took 23.15 seconds versus 49.16
+  seconds for initial analysis. These are observed runs, not a controlled quality
+  benchmark: the refinement also changed the brief.
+- Travel plans now reject sub-second cuts. The native draft remains video-only;
+  portrait footage is pillarboxed in the landscape test project. Framing and
+  sound need explicit work; passing integration checks does not make this a
+  finished travel film.
+- Native Apply/Undo/Redo, seeking at the first cut, saving, Stop and project
+  conversation reset were exercised. The review project is kept with the supplied
+  clips under `montaz-review/goa-highlight.kdenlive`, outside this repository.
+
+## Next implementation gates, in order
+
+1. **Editorial quality:** improve temporal evidence and opening/detail/ending
+   selection; skip unsuitable micro-clips, expose duration feasibility and shot
+   rationale. Review the Goa edit before claiming quality improvements.
+2. **Framing:** explicit project orientation and native framing proposals for mixed
+   portrait/landscape. Preserve manual reframing and test exact undo/redo.
+3. **Sound:** ElevenLabs music and occasional effects, measured beat/phrase timing,
+   native audio insertion and gain/fades. Stop and errors must cleanly terminate.
+4. **Narration and captions:** separately cached speech evidence, per-project mode,
+   native subtitle styles. Silent footage must skip speech-only jobs. Test style
+   switching without subtitle duplication or timing drift.
+5. **Quality review:** one bounded revision, honest unavailable/failed states,
+   mixed-media regressions and exported output review. Publication comes later.
+
+Each gate needs focused regressions plus an actual editor/output check. Provider
+success and passing unit tests alone do not establish editorial quality.
