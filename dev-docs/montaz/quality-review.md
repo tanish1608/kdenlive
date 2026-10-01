@@ -299,3 +299,44 @@ Validation: 140 passing Python checks plus two optional native helper checks;
 38 Qt transport, seven chat checks, native `assistanttest`, and controlled rendered
 QA pass. Beat/phrase analysis, candidate search, manual anchors, directional whips,
 object wipes and speed ramps remain pending. Generic pacing presets remain in use.
+
+## Multi-candidate match selection
+
+Branch `codex/claude-match-cut-candidates`, pending Codex review. One Gemini
+request now returns up to three seed pairs for the two selected clips; at most
+two are tracked and the valid pair with the lowest crop/motion cost is proposed.
+Definitions: zoom is the largest uniform scale; crop is the mean of
+`1 - 1/scale²` over all 60 keyframes; motion is the mean per-frame largest canvas
+displacement of any source corner added by the reframing; cost = crop + 10 × motion.
+
+**Offline fixture (no provider call).** `check_match_quality.py` offers pairs in
+the order zoom-heavy corner, discs, flat corner. Seed crop ranks them flat, discs,
+zoom-heavy. The real helper rejects the flat pair after one outgoing track; the
+incoming track is skipped. The disc pair is selected at 1.23× zoom, 28% cropped
+and 1.17% canvas motion per frame (cost 0.396). The third pair is never tracked.
+One provider call, five helper calls and 1.9 seconds are recorded. A repeat
+request reuses the cache in 0.001 seconds with no provider or helper calls.
+Keyframes cover outgoing clip frames 30–59 and incoming frames 0–29, which are
+timeline frames 30–59 and 60–89 around the cut at frame 60. Source frames match
+clip frames because `in_frame` is 0. Native apply, one Undo, Redo, MLT
+serialization and export pass with 603 assertions in 7 test cases. The H.264
+export is 1920×1080 at 30000/1001 FPS with exactly 120 frames.
+
+**Live Gemini (`gemini-3.8-flash`, synthetic frames only).** The model returned one
+pair, the textured discs, rather than padding to three. It tracked and matched at
+1.25× zoom, 27% cropped and 1.06% motion per frame. The run took 5.1 seconds with
+one provider call and four helper calls. This is one sample, not a quality claim.
+
+Most of the measured motion is residual per-frame scale change: about 0.9–1.3%
+zoom change per frame after size smoothing. Translation is about 0.4–0.5% of the
+canvas per frame. CSRT box jitter can still produce slight breathing on review.
+The cost weight is a documented editorial choice, not a calibrated perceptual
+model. Ranking uses seed boxes only, so a third pair can be skipped even when it
+would have tracked better. Real Goa footage has not been re-run with this
+branch, so the earlier no-match results still stand. Desktop Apply/Undo for this
+branch also awaits Codex.
+
+Validation: 158 Python checks discovered: 156 pass and the two optional native
+helper checks skip by default. Run separately with the branch's
+`montaz-tracker`, both helper checks pass. 38 Qt transport, seven chat checks,
+native `assistanttest` and the controlled rendered QA also pass.

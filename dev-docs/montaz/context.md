@@ -284,14 +284,16 @@ packaging/publication remain deferred.
 
 The user accepted a first object-aligned match-cut prototype before the remaining
 beat/whip/wipe/ramp work. Two adjacent selected video-only instances are captured
-against the native revision. Gemini selects one compatible object pair or an
-explicit empty answer; a separate bounded `montaz-tracker` uses existing MLT and
-OpenCV CSRT to decode/track every frame of the outgoing last/incoming first second.
+against the native revision. One Gemini request returns up to three compatible
+object pairs or an explicit empty answer; Python ranks them geometrically and a
+separate bounded `montaz-tracker` uses existing MLT and OpenCV CSRT to
+decode/track at most two pairs over every frame of the outgoing last/incoming
+first second, keeping the valid pair with the lowest crop/motion cost.
 Uniform native Transform crops align centers and apparent heights, capped at 2×,
 with shape, appearance, motion and canvas-coverage gates. Size smoothing prevents
 integer tracking-box jitter becoming breathing zoom. Video-stream tail checks
-avoid frozen audio-only tails. The separate `object-match-2` cache retains complete
-pair evidence by content, trim, FPS, canvas and model; source hashes are rechecked.
+avoid frozen audio-only tails. The separate `object-match-3` cache retains complete
+candidate evidence by content, trim, FPS, canvas and model; source hashes are rechecked.
 
 The right dock has Match cut, a two-by-two original/aligned boundary comparison,
 explicit Apply and Stop. Native application preserves source/timing/IDs, checks
