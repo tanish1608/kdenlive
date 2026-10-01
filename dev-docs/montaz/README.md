@@ -60,6 +60,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - A visual draft receives one cached-observation quality review before Apply.
   One revision preserves total frames and passes the original source/recipe
   checks; failed review remains explicitly unavailable, never approval.
+- **Match cut** proposes object alignment for two selected adjacent video-only
+  shots. Gemini selects one pair, native MLT/CSRT tracks boundary windows, and
+  bounded uniform Transform keyframes preserve timing. Comparison, one Undo,
+  caching, stale-result rejection and native rendered geometry are exercised.
+  This is a selected-pair prototype; it does not search the entire bin.
 - Still pending: deferred portrait framing, additional native failure checks,
   narration, audio pairing/ducking, beat-aligned cuts, word alignment,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;

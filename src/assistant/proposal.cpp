@@ -623,3 +623,105 @@ QString Montaz::validateCaptions(const QJsonObject &snapshot, const QJsonObject 
     }
     return review.value(QStringLiteral("skipped_clips")) == total - captioned.size() ? QString() : invalid();
 }
+
+QString Montaz::validateMatchRequest(const QJsonObject &snapshot, const QJsonObject &spec)
+{
+    if (!validateSnapshot(snapshot).isEmpty() || !fields(spec, {"clips", "width", "height"}) || !spec.value("clips").isArray() ||
+        spec.value("clips").toArray().size() != 2 || !integer(spec.value("width"), 32) || !integer(spec.value("height"), 32) ||
+        spec.value("width").toInt() > 8192 || spec.value("height").toInt() > 8192)
+        return invalid();
+    const double aspect = spec.value("width").toDouble() / spec.value("height").toDouble();
+    const auto fps = snapshot.value("frame_rate").toObject();
+    const double rate = fps.value("numerator").toDouble() / fps.value("denominator").toDouble();
+    if (aspect < 0.25 || aspect > 4 || rate < 1 || rate > 60) return invalid();
+    QJsonObject previous;
+    for (const auto value : spec.value("clips").toArray()) {
+        const auto c = value.toObject();
+        bool occupied = false, asset = false, track = false;
+        if (!fields(c, {"instance_id", "bin_id", "track_id", "start_frame", "in_frame", "duration_frames"}) || !editorId(c.value("instance_id")) ||
+            !range(c, "start_frame") || !integer(c.value("in_frame")) || c.value("duration_frames").toInt() < 2)
+            return invalid();
+        for (const auto v : snapshot.value("occupied").toArray()) {
+            auto o = v.toObject();
+            if (o.value("instance_id") == c.value("instance_id")) {
+                o.insert("bin_id", c.value("bin_id"));
+                o.insert("in_frame", c.value("in_frame"));
+                occupied = o == c;
+            }
+        }
+        for (const auto v : snapshot.value("assets").toArray()) {
+            const auto a = v.toObject();
+            if (a.value("bin_id") == c.value("bin_id"))
+                asset = a.value("has_video").toBool() &&
+                        c.value("in_frame").toInteger() + c.value("duration_frames").toInteger() <= a.value("duration_frames").toInteger();
+        }
+        for (const auto v : snapshot.value("tracks").toArray()) {
+            const auto t = v.toObject();
+            if (t.value("track_id") == c.value("track_id")) track = t.value("kind") == "video" && !t.value("locked").toBool();
+        }
+        if (!occupied || !asset || !track ||
+            (!previous.isEmpty() &&
+             (previous.value("track_id") != c.value("track_id") ||
+              previous.value("start_frame").toInteger() + previous.value("duration_frames").toInteger() != c.value("start_frame").toInteger())))
+            return invalid();
+        previous = c;
+    }
+    return {};
+}
+
+QString Montaz::validateMatchReview(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review)
+{
+    if (!validateMatchRequest(snapshot, spec).isEmpty() ||
+        !fields(review, {"request_id", "project_id", "sequence_id", "base_revision", "frame_rate", "protocol_version", "status", "reason", "source_hashes",
+                         "operations", "target", "preview", "cached"}) ||
+        !identifier(review.value("request_id")) || review.value("project_id") != snapshot.value("project_id") ||
+        review.value("sequence_id") != snapshot.value("sequence_id") || review.value("base_revision") != snapshot.value("revision") ||
+        review.value("frame_rate") != snapshot.value("frame_rate") || review.value("protocol_version") != 3 || !review.value("cached").isBool() ||
+        !review.value("reason").isString() || review.value("reason").toString().trimmed().isEmpty() || review.value("reason").toString().size() > 600 ||
+        !review.value("source_hashes").isObject() || !review.value("operations").isArray() || !review.value("target").isObject() ||
+        !review.value("preview").isObject())
+        return invalid();
+    QSet<QString> ids;
+    for (const auto v : spec.value("clips").toArray())
+        ids.insert(v.toObject().value("bin_id").toString());
+    const auto hashes = review.value("source_hashes").toObject();
+    const auto keys = hashes.keys();
+    if (QSet<QString>(keys.begin(), keys.end()) != ids) return invalid();
+    for (const auto v : hashes)
+        if (!v.isString() || !QRegularExpression("^[a-f0-9]{64}$").match(v.toString()).hasMatch()) return invalid();
+    const auto preview = review.value("preview").toObject();
+    if (!fields(preview, {"outgoing", "incoming"})) return invalid();
+    for (const auto v : preview) {
+        if (!v.isString() || v.toString().size() > 250000) return invalid();
+        const auto raw = v.toString().toLatin1();
+        const auto bytes = QByteArray::fromBase64(raw, QByteArray::AbortOnBase64DecodingErrors);
+        if (!bytes.startsWith(QByteArray::fromHex("ffd8")) || !bytes.endsWith(QByteArray::fromHex("ffd9")) || bytes.toBase64() != raw) return invalid();
+    }
+    const auto target = review.value("target").toObject();
+    if (!fields(target, {"x", "y", "height"})) return invalid();
+    for (const auto v : target)
+        if (!v.isDouble() || !std::isfinite(v.toDouble()) || v.toDouble() < 0 || v.toDouble() > 1) return invalid();
+    const auto ops = review.value("operations").toArray(), clips = spec.value("clips").toArray();
+    if (review.value("status") == "no_match") return ops.isEmpty() ? QString() : invalid();
+    if (review.value("status") != "matched" || ops.size() != 2 || target.value("height").toDouble() <= 0) return invalid();
+    const auto fps = snapshot.value("frame_rate").toObject();
+    const int frames = qMax(2, int(std::floor(fps.value("numerator").toDouble() / fps.value("denominator").toDouble() + 0.5)));
+    for (int i = 0; i < 2; ++i) {
+        const auto c = clips[i].toObject(), op = ops[i].toObject();
+        const auto kfs = op.value("keyframes").toArray();
+        const int length = qMin(frames, c.value("duration_frames").toInt()), offset = i == 0 ? c.value("duration_frames").toInt() - length : 0;
+        if (!fields(op, {"instance_id", "keyframes"}) || op.value("instance_id") != c.value("instance_id") || !op.value("keyframes").isArray() ||
+            kfs.size() != length)
+            return invalid();
+        for (int j = 0; j < length; ++j) {
+            const auto k = kfs[j].toObject();
+            if (!fields(k, {"frame", "x", "y", "scale"}) || k.value("frame") != offset + j) return invalid();
+            for (const auto &key : {"x", "y", "scale"})
+                if (!k.value(key).isDouble() || !std::isfinite(k.value(key).toDouble())) return invalid();
+            const double s = k.value("scale").toDouble(), x = k.value("x").toDouble(), y = k.value("y").toDouble();
+            if (s < 1 || s > 2 || x > 0.000001 || y > 0.000001 || x + s < 0.999999 || y + s < 0.999999) return invalid();
+            if (j > 0 && std::abs(s - kfs[j - 1].toObject().value("scale").toDouble()) > 0.08) return invalid();
+        }
+    }
+    return {};
+}

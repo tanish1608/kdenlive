@@ -13,6 +13,7 @@ from .effects import ElevenLabsEffects, compose_effect
 from .gemini import AssistantError, Gemini
 from .lifecycle import Run, Status
 from .music import ElevenLabs, compose_music
+from .match_cuts import propose_match
 from .timing import refine_timing
 from .sound_cues import suggest_sounds
 from .planning import MediaTools, brief_from_wire, plan_media
@@ -106,10 +107,13 @@ def main() -> int:
         musical = request.get("type") in {"compose_music", "compose_effect"}
         timing = request.get("type") == "refine_timing"
         cues = request.get("type") == "suggest_sounds"
+        matching = request.get("type") == "propose_match"
         captions = request.get("type") == "propose_captions"
         fields(
             request,
-            keys | {"captions", "sources"}
+            keys | {"match", "sources"}
+            if matching
+            else keys | {"captions", "sources"}
             if captions
             else keys | {"cues", "sources"}
             if cues
@@ -126,6 +130,7 @@ def main() -> int:
             or request["version"] != 1
             or request["type"]
             not in {
+                "propose_match",
                 "plan_demo",
                 "plan_media",
                 "compose_music",
@@ -142,7 +147,9 @@ def main() -> int:
         if type(request_id) is not str or not request_id or len(request_id) > 128:
             raise ProposalError("Invalid request ID")
         stage = (
-            "captions"
+            "match"
+            if matching
+            else "captions"
             if captions
             else "sound_cues"
             if cues
@@ -158,7 +165,40 @@ def main() -> int:
         send_event(run.events[-1])
         run.transition(stage, Status.RUNNING)
         send_event(run.events[-1])
-        if captions:
+        if matching:
+            provider = Gemini.configured()
+
+            def match_progress(phase, cached):
+                media.check()
+                output.write(
+                    encode(
+                        dict(
+                            version=1,
+                            type="match_progress",
+                            phase=phase,
+                            cached=cached,
+                            model=provider.model,
+                        )
+                    )
+                )
+                output.flush()
+
+            review = propose_match(
+                snapshot,
+                request_id,
+                request["match"],
+                request["sources"],
+                Path(
+                    os.environ.get(
+                        "MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis"
+                    )
+                )
+                / "matches",
+                provider,
+                media,
+                match_progress,
+            )
+        elif captions:
 
             def caption_progress(completed, cached, skipped, total):
                 media.check()
@@ -282,7 +322,9 @@ def main() -> int:
         run.finish()
         send_event(run.events[-1])
         message = (
-            {"version": 1, "type": "captions", "review": caption_review}
+            {"version": 1, "type": "match", "review": review}
+            if matching
+            else {"version": 1, "type": "captions", "review": caption_review}
             if captions
             else {"version": 1, "type": "sound_cues", "review": cue_review}
             if cues

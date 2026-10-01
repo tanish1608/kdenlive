@@ -14,6 +14,8 @@
 #include <QAudioOutput>
 #include <QComboBox>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -23,6 +25,7 @@
 #include <QListWidget>
 #include <QMediaPlayer>
 #include <QMenu>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
@@ -88,7 +91,13 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     captionsMenu->addAction(i18n("Bold caption style"), this, [this]() { changeCaptionStyle(QStringLiteral("bold")); });
     captionsMenu->addAction(i18n("Original caption styles"), this, [this]() { changeCaptionStyle(QStringLiteral("original")); });
     m_captions->setMenu(captionsMenu);
-    layout->addWidget(m_captions);
+    auto visualActions = new QHBoxLayout;
+    visualActions->addWidget(m_captions);
+    m_match = new QPushButton(i18n("Match cut"), this);
+    m_match->setToolTip(i18n("Select two adjacent video-only shots to review an object-aligned match cut."));
+    visualActions->addWidget(m_match);
+    layout->addLayout(visualActions);
+    connect(m_match, &QPushButton::clicked, this, &AssistantWidget::matchCut);
     connect(m_align, &QPushButton::clicked, this, &AssistantWidget::refineTiming);
     connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
     m_tasks = new QTreeWidget(this);
@@ -144,6 +153,10 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_listen->setChecked(false);
         m_status->setText(i18n("Audio preview is unavailable. You can inspect the generated track after applying it."));
     });
+    m_matchPreview = new QPushButton(i18n("Compare alignment"), m_previewCard);
+    m_matchPreview->hide();
+    previewLayout->addWidget(m_matchPreview);
+    connect(m_matchPreview, &QPushButton::clicked, this, &AssistantWidget::previewMatch);
     previewLayout->addWidget(m_apply);
     m_previewCard->hide();
     layout->addWidget(m_previewCard);
@@ -175,6 +188,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_music->setEnabled(!busy);
         m_effect->setEnabled(!busy);
         m_align->setEnabled(!busy);
+        m_match->setEnabled(!busy);
         m_captions->setEnabled(!busy);
         m_stop->setEnabled(busy);
         m_newBrief->setEnabled(!busy);
@@ -195,17 +209,24 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(i18n("Stopped"));
-        reply(m_captionMode  ? i18n("Stopped. No captions were applied. Completed speech results are kept for reuse.")
-              : m_cueMode    ? i18n("Stopped. No sound was generated or applied; your timeline stays unchanged.")
-              : m_timingMode ? i18n("Stopped. Your cuts and music stay unchanged.")
-              : m_effectMode ? i18n("Stopped. No sound was applied. Completed audio is kept for reuse; ElevenLabs may still finish a submitted request.")
-              : m_musicMode  ? i18n("Stopped. No audio was applied. Completed music is kept for reuse; ElevenLabs may still finish a submitted request.")
-                             : i18n("Stopped. Completed footage analysis is saved for your next attempt."));
+        reply(m_matchMode     ? i18n("Stopped. No alignment was applied; completed pair evidence is kept for reuse.")
+              : m_captionMode ? i18n("Stopped. No captions were applied. Completed speech results are kept for reuse.")
+              : m_cueMode     ? i18n("Stopped. No sound was generated or applied; your timeline stays unchanged.")
+              : m_timingMode  ? i18n("Stopped. Your cuts and music stay unchanged.")
+              : m_effectMode  ? i18n("Stopped. No sound was applied. Completed audio is kept for reuse; ElevenLabs may still finish a submitted request.")
+              : m_musicMode   ? i18n("Stopped. No audio was applied. Completed music is kept for reuse; ElevenLabs may still finish a submitted request.")
+                              : i18n("Stopped. Completed footage analysis is saved for your next attempt."));
     });
     connect(m_worker, &WorkerClient::failed, this, [this](const QString &code) {
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(code == QStringLiteral("no_alignment_needed") ? i18n("No change") : i18n("Failed"));
+        if (m_matchMode) {
+            reply(code == QStringLiteral("tracking_unavailable")
+                      ? i18n("Object tracking could not verify this pair. Try another cut. No effects were applied.")
+                      : i18n("The match cut could not be prepared (%1). No effects were applied; check Run logs.", code));
+            return;
+        }
         if (m_captionMode) {
             if (code == QStringLiteral("missing_api_key"))
                 reply(i18n("Gemini is not configured. Set GEMINI_API_KEY or gemini_api_key in the private assistant settings."));
@@ -284,6 +305,14 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             reply(i18n("Planning could not finish. Check your source files and unlocked video tracks. No edit was applied."));
     });
     connect(m_worker, &WorkerClient::eventReceived, this, [this](const QJsonObject &event) {
+        if (m_matchMode && event.value("type") == "match_progress") {
+            if (event.value("phase") == "tracking") {
+                setTask(0, i18n("Done"));
+                setTask(1, i18n("Working"));
+                m_activeTask = 1;
+            }
+            return;
+        }
         if (event.value(QStringLiteral("type")) == QStringLiteral("caption_progress")) {
             m_status->setText(i18n("Checking speech · %1 of %2 audio clips · %3 cached · %4 without speech", event.value(QStringLiteral("completed")).toInt(),
                                    event.value(QStringLiteral("total")).toInt(), event.value(QStringLiteral("cached")).toInt(),
@@ -566,7 +595,53 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                     "%1 cut shifts are ready for review. Apply changes the existing clips in one undoable edit and keeps the music and total length.",
                     m_preview->count()));
     });
+    connect(m_worker, &WorkerClient::matchReady, this, [this](const QJsonObject &review) {
+        if (m_adapter->snapshot() != m_snapshot || !validateMatchReview(m_snapshot, m_matchSpec, review).isEmpty()) {
+            clearProposal();
+            finishTasks(i18n("Outdated"));
+            reply(i18n("The sequence changed. Request a fresh match cut."));
+            return;
+        }
+        setTask(0, i18n("Done"));
+        setTask(1, i18n("Done"));
+        if (review.value("status") == "no_match") {
+            finishTasks(i18n("No match"));
+            reply(i18n("No convincing alignment fits this pair: %1. Your edit stays unchanged.", review.value("reason").toString()));
+            return;
+        }
+        m_matchReview = review;
+        double zoom = 1;
+        for (const auto op : review.value("operations").toArray())
+            for (const auto k : op.toObject().value("keyframes").toArray())
+                zoom = qMax(zoom, k.toObject().value("scale").toDouble());
+        m_preview->addItem(i18n("Object-aligned cut · up to %1× zoom", QString::number(zoom, 'f', 2)));
+        m_preview->item(0)->setData(Qt::UserRole, review.value("reason").toString());
+        m_preview->setCurrentRow(0);
+        m_previewCard->setTitle(i18n("Proposed match cut"));
+        m_apply->setText(i18n("Apply alignment"));
+        m_apply->setEnabled(true);
+        m_matchPreview->show();
+        m_previewCard->show();
+        setTask(2, i18n("Ready"));
+        m_activeTask = 2;
+        reply(i18n("A tracked alignment is ready. Compare the boundary frames, then Apply to add editable native transforms in one Undo. %1",
+                   review.value("reason").toString()));
+    });
     connect(m_apply, &QPushButton::clicked, this, [this]() {
+        if (!m_matchReview.isEmpty()) {
+            const auto review = m_matchReview;
+            m_applying = true;
+            const auto result = m_adapter->applyMatch(m_snapshot, m_matchSpec, review);
+            m_applying = false;
+            m_worker->recordApply(review.value("request_id").toString(), result.isEmpty() ? QStringLiteral("applied") : result);
+            clearProposal();
+            setTask(2, i18n("Done"));
+            setTask(3, result.isEmpty() ? i18n("Done") : i18n("Failed"));
+            m_activeTask = -1;
+            reply(result.isEmpty() ? i18n("Aligned both subjects using native Transform effects. Undo restores both shots.")
+                                   : i18n("Alignment was rejected (%1). Request a fresh review.", result));
+            return;
+        }
         if (!m_captionReview.isEmpty()) {
             const auto review = m_captionReview;
             m_applying = true;
@@ -641,7 +716,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     connect(m_adapter, &EditorAdapter::invalidated, this, [this]() {
         if (m_applying) return;
         if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty() || !m_captionReview.isEmpty() ||
-            m_worker->busy()) {
+            !m_matchReview.isEmpty() || m_worker->busy()) {
             const bool busy = m_worker->busy();
             clearProposal();
             if (busy) m_worker->stop();
@@ -661,7 +736,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     contextTimer->start();
     const auto briefChanged = [this]() {
-        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty() || !m_captionReview.isEmpty()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty() || !m_captionReview.isEmpty() ||
+            !m_matchReview.isEmpty()) {
             clearProposal();
             finishTasks(i18n("Outdated"));
             reply(i18n("Editing style or duration changed. Send a message to request a new plan."));
@@ -678,6 +754,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
     m_musicMode = false;
     m_effectMode = false;
     m_cueMode = false;
+    m_matchMode = false;
     m_timingMode = false;
     m_captionMode = false;
     const QStringList taskNames{i18n("Understand footage"), i18n("Arrange the story"), i18n("Check story and pacing"), i18n("Apply to timeline")};
@@ -759,6 +836,9 @@ void Montaz::AssistantWidget::finishTasks(const QString &status)
 void Montaz::AssistantWidget::clearProposal()
 {
     m_proposal = {};
+    m_matchSpec = {};
+    m_matchReview = {};
+    m_matchPreview->hide();
     m_soundtrack = {};
     m_musicSpec = {};
     m_timingSpec = {};
@@ -786,6 +866,7 @@ void Montaz::AssistantWidget::composeMusic()
     m_musicMode = true;
     m_effectMode = false;
     m_cueMode = false;
+    m_matchMode = false;
     m_timingMode = false;
     m_captionMode = false;
     m_musicSpec = m_adapter->musicRequest(m_recipe->currentData().toString(), m_brief);
@@ -814,6 +895,7 @@ void Montaz::AssistantWidget::refineTiming()
 {
     clearProposal();
     finishTasks(i18n("Superseded"));
+    m_matchMode = false;
     m_timingMode = true;
     m_captionMode = false;
     m_musicMode = false;
@@ -873,6 +955,7 @@ void Montaz::AssistantWidget::beginEffect(const QJsonObject &spec)
     m_cueMode = false;
     m_effectMode = true;
     m_musicMode = true;
+    m_matchMode = false;
     m_timingMode = false;
     m_captionMode = false;
     m_musicSpec = spec;
@@ -904,6 +987,7 @@ void Montaz::AssistantWidget::suggestSounds()
     m_cueMode = true;
     m_musicMode = false;
     m_effectMode = false;
+    m_matchMode = false;
     m_timingMode = false;
     m_captionMode = false;
     m_cueSpec = m_adapter->cueRequest();
@@ -944,6 +1028,7 @@ void Montaz::AssistantWidget::generateCaptions()
     clearProposal();
     finishTasks(i18n("Superseded"));
     m_captionMode = true;
+    m_matchMode = false;
     m_cueMode = m_musicMode = m_effectMode = m_timingMode = false;
     m_captionSpec = m_adapter->captionRequest();
     m_snapshot = m_adapter->snapshot();
@@ -985,4 +1070,82 @@ void Montaz::AssistantWidget::changeCaptionStyle(const QString &preset)
     reply(result.isEmpty() ? i18n("Caption appearance updated. Text and timing are preserved; Undo restores the previous appearance. Original restores each "
                                   "caption’s saved style.")
                            : i18n("Add captions and enable and unlock their track before changing the style."));
+}
+
+void Montaz::AssistantWidget::matchCut()
+{
+    clearProposal();
+    finishTasks(i18n("Superseded"));
+    m_captionMode = m_cueMode = m_musicMode = m_effectMode = m_timingMode = false;
+    m_matchMode = true;
+    m_matchSpec = m_adapter->matchRequest();
+    m_snapshot = m_adapter->snapshot();
+    m_contextKey = m_adapter->contextKey();
+    if (m_matchSpec.isEmpty()) {
+        reply(i18n(
+            "Select two adjacent video-only shots on the same unlocked track. This prototype requires normal speed and no groups, effects or transitions."));
+        return;
+    }
+    QSet<QString> bins;
+    for (const auto v : m_matchSpec.value("clips").toArray())
+        bins.insert(v.toObject().value("bin_id").toString());
+    const auto sources = m_adapter->mediaSources(m_snapshot, bins);
+    if (!m_worker->start(m_snapshot, {{"match", m_matchSpec}, {"sources", sources}})) {
+        reply(i18n("Match-cut analysis could not start. Check the selected source files."));
+        return;
+    }
+    const QStringList tasks{i18n("Find compatible objects"), i18n("Track and align subjects"), i18n("Compare boundary frames"),
+                            i18n("Apply native transforms")};
+    for (int i = 0; i < 4; ++i) {
+        m_tasks->topLevelItem(i)->setText(0, tasks[i]);
+        setTask(i, i18n("Waiting"));
+    }
+    m_tasks->show();
+    m_activeTask = 0;
+    setTask(0, i18n("Working"));
+    reply(
+        i18n("I’ll look for one graphic match and verify object motion near this cut. Completed pair analysis is cached; Stop leaves the timeline unchanged."));
+}
+
+void Montaz::AssistantWidget::previewMatch()
+{
+    if (m_matchReview.isEmpty()) return;
+    QDialog dialog(this);
+    dialog.setWindowTitle(i18n("Compare match-cut alignment"));
+    auto grid = new QGridLayout(&dialog);
+    const auto previews = m_matchReview.value("preview").toObject();
+    const auto ops = m_matchReview.value("operations").toArray();
+    for (int i = 0; i < 2; ++i) {
+        const QString key = i == 0 ? QStringLiteral("outgoing") : QStringLiteral("incoming");
+        const auto image = QImage::fromData(QByteArray::fromBase64(previews.value(key).toString().toLatin1()), "JPG");
+        if (image.isNull() || image.width() > 640 || image.height() > 640) return;
+        const auto frames = ops[i].toObject().value("keyframes").toArray();
+        const auto transform = (i == 0 ? frames.last() : frames.first()).toObject();
+        QImage aligned(image.size(), QImage::Format_RGB32);
+        aligned.fill(Qt::black);
+        QPainter painter(&aligned);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        const double scale = transform.value("scale").toDouble();
+        painter.drawImage(QRectF(transform.value("x").toDouble() * image.width(), transform.value("y").toDouble() * image.height(), image.width() * scale,
+                                 image.height() * scale),
+                          image);
+        painter.end();
+        auto title = new QLabel(i == 0 ? i18n("Outgoing shot") : i18n("Incoming shot"), &dialog);
+        grid->addWidget(title, 0, i);
+        for (int row = 0; row < 2; ++row) {
+            auto view = new QLabel(&dialog);
+            view->setPixmap(QPixmap::fromImage(row == 0 ? image : aligned).scaled(400, 260, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            view->setAccessibleName(row == 0 ? i18n("Original boundary frame") : i18n("Aligned boundary frame"));
+            grid->addWidget(view, row + 1, i);
+        }
+    }
+    auto note = new QLabel(i18n("Top: original · Bottom: proposed alignment. Boundary preview only; review motion in the project monitor after Apply. Existing "
+                                "source letterboxing may remain."),
+                           &dialog);
+    note->setWordWrap(true);
+    grid->addWidget(note, 3, 0, 1, 2);
+    auto close = new QPushButton(i18n("Close"), &dialog);
+    grid->addWidget(close, 4, 1);
+    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+    dialog.exec();
 }

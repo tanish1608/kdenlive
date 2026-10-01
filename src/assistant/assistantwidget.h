@@ -32,6 +32,8 @@ private:
     void changeCaptionStyle(const QString &preset);
     void suggestSounds();
     void beginEffect(const QJsonObject &spec);
+    void matchCut();
+    void previewMatch();
     void refineTiming();
     void planEdit(const QString &message);
     void reply(const QString &message);
@@ -46,6 +48,11 @@ private:
     QPushButton *m_music;
     QPushButton *m_effect;
     QPushButton *m_align;
+    QPushButton *m_match;
+    QPushButton *m_matchPreview;
+    bool m_matchMode{false};
+    QJsonObject m_matchSpec;
+    QJsonObject m_matchReview;
     QPushButton *m_captions;
     bool m_captionMode{false};
     QJsonObject m_captionSpec;

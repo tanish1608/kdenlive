@@ -6,14 +6,17 @@
 #include "bin/model/subtitlemodel.hpp"
 #include "bin/projectclip.h"
 #include "doc/kdenlivedoc.h"
+#include "effects/effectstack/model/effectstackmodel.hpp"
 #include "test_utils.hpp"
 
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <cmath>
+#include <mlt++/MltConsumer.h>
 
 namespace {
 void writeMusicWave(const QString &path, int seconds)
@@ -578,4 +581,296 @@ TEST_CASE("Headless master-effect loading restores subtitles without a main wind
     document.closing = true;
     bin->clean();
     pCore->projectManager()->testSetDocument(nullptr);
+}
+
+TEST_CASE("Object match cuts add native transforms atomically", "[Montaz]")
+{
+    const auto oldProfile = pCore->getCurrentProfilePath();
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto stack = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(stack);
+    pCore->projectManager()->testSetDocument(&document);
+    REQUIRE(pCore->setCurrentProfile(QStringLiteral("atsc_1080p_25")));
+    auto timeline = TimelineItemModel::construct(document.uuid(), stack);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int video = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, video));
+    int ids[2] = {-1, -1};
+    for (int i = 0; i < 2; ++i) {
+        const auto bid = KdenliveTests::createAVProducer(pCore->getProjectProfile(), bin);
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/2/11").arg(bid), video, i * 10, ids[i], true, false, false));
+    }
+    REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+    stack->clear();
+    {
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot(), spec = adapter.matchRequest();
+        REQUIRE_FALSE(spec.isEmpty());
+        QJsonArray operations;
+        QJsonObject hashes;
+        const auto fps = context.value("frame_rate").toObject();
+        const int length = qMin(10, qMax(2, int(std::floor(fps.value("numerator").toDouble() / fps.value("denominator").toDouble() + 0.5))));
+        const auto clips = spec.value("clips").toArray();
+        for (int i = 0; i < 2; ++i) {
+            const auto c = clips[i].toObject();
+            QFile file(bin->getClipByBinID(c.value("bin_id").toString())->clipUrl());
+            REQUIRE(file.open(QIODevice::ReadOnly));
+            hashes[c.value("bin_id").toString()] = QString::fromLatin1(QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+            QJsonArray frames;
+            for (int j = 0; j < length; ++j)
+                frames.append(QJsonObject{{"frame", i == 0 ? 10 - length + j : j}, {"x", -0.025}, {"y", -0.025}, {"scale", 1.05}});
+            operations.append(QJsonObject{{"instance_id", QString::number(ids[i])}, {"keyframes", frames}});
+        }
+        QJsonObject review{{"request_id", "match-test"},
+                           {"project_id", context.value("project_id")},
+                           {"sequence_id", context.value("sequence_id")},
+                           {"base_revision", context.value("revision")},
+                           {"frame_rate", context.value("frame_rate")},
+                           {"protocol_version", 3},
+                           {"status", "matched"},
+                           {"reason", "Controlled alignment"},
+                           {"cached", false},
+                           {"source_hashes", hashes},
+                           {"operations", operations},
+                           {"target", QJsonObject{{"x", 0.5}, {"y", 0.5}, {"height", 0.2}}},
+                           {"preview", QJsonObject{{"outgoing", "/9j/2Q=="}, {"incoming", "/9j/2Q=="}}}};
+        REQUIRE(Montaz::validateMatchReview(context, spec, review).isEmpty());
+        SECTION("Apply keeps clip timing and source trims; one Undo and Redo preserve keyframes")
+        {
+            REQUIRE(adapter.applyMatch(context, spec, review).isEmpty());
+            REQUIRE(stack->count() == 1);
+            QString stored;
+            for (int i = 0; i < 2; ++i) {
+                auto effects = timeline->getClipEffectStackModel(ids[i]);
+                REQUIRE(effects->rowCount() == 1);
+                const auto model = effects->getAssetModelById(QStringLiteral("qtblend"));
+                REQUIRE(model);
+                const auto data = model->getAllParameters();
+                auto found = std::find_if(data.begin(), data.end(), [](const auto &v) { return v.first == QStringLiteral("rect"); });
+                REQUIRE(found != data.end());
+                if (i == 0) {
+                    stored = found->second.toString();
+                    REQUIRE(stored.startsWith(QString::number(2 + 10 - length) + QLatin1Char('=')));
+                }
+                REQUIRE(timeline->getClipPosition(ids[i]) == i * 10);
+                REQUIRE(timeline->getClipIn(ids[i]) == 2);
+                REQUIRE(timeline->getClipPlaytime(ids[i]) == 10);
+            }
+            REQUIRE_FALSE(adapter.applyMatch(context, spec, review).isEmpty());
+            stack->undo();
+            for (int id : ids)
+                REQUIRE(timeline->getClipEffectStackModel(id)->rowCount() == 0);
+            stack->redo();
+            for (int id : ids)
+                REQUIRE(timeline->getClipEffectStackModel(id)->rowCount() == 1);
+            const auto params = timeline->getClipEffectStackModel(ids[0])->getAssetModelById(QStringLiteral("qtblend"))->getAllParameters();
+            const auto found = std::find_if(params.begin(), params.end(), [](const auto &v) { return v.first == QStringLiteral("rect"); });
+            REQUIRE(found->second.toString() == stored);
+            REQUIRE(timeline->checkConsistency());
+        }
+        SECTION("A stale revision or selection never changes effects")
+        {
+            REQUIRE(timeline->requestSetSelection({ids[0]}));
+            REQUIRE_FALSE(adapter.applyMatch(context, spec, review).isEmpty());
+            REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+            auto stale = review;
+            stale["base_revision"] = context.value("revision").toInt() + 1;
+            REQUIRE_FALSE(adapter.applyMatch(context, spec, stale).isEmpty());
+            REQUIRE(stack->count() == 0);
+        }
+        SECTION("Invalid geometry and source identity reject the whole batch")
+        {
+            auto bad = review;
+            auto ops = operations;
+            auto op = ops[1].toObject();
+            auto frames = op["keyframes"].toArray();
+            auto k = frames[0].toObject();
+            k["scale"] = 3;
+            frames[0] = k;
+            op["keyframes"] = frames;
+            ops[1] = op;
+            bad["operations"] = ops;
+            REQUIRE_FALSE(adapter.applyMatch(context, spec, bad).isEmpty());
+            bad = review;
+            auto changed = hashes;
+            changed[changed.begin().key()] = QString(64, 'a');
+            bad["source_hashes"] = changed;
+            REQUIRE_FALSE(adapter.applyMatch(context, spec, bad).isEmpty());
+            for (int id : ids)
+                REQUIRE(timeline->getClipEffectStackModel(id)->rowCount() == 0);
+            REQUIRE(stack->count() == 0);
+        }
+        SECTION("Real clip groups stay ineligible while temporary selection is supported")
+        {
+            timeline->requestClearSelection();
+            REQUIRE(timeline->requestClipsGroup({ids[0], ids[1]}) >= 0);
+            REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+            REQUIRE(adapter.matchRequest().isEmpty());
+            REQUIRE_FALSE(adapter.applyMatch(context, spec, review).isEmpty());
+            for (int id : ids)
+                REQUIRE(timeline->getClipEffectStackModel(id)->rowCount() == 0);
+        }
+        SECTION("A failed second native effect rolls the first effect back")
+        {
+            int step = 0;
+            const auto result = Montaz::applyInsertBatch(
+                operations,
+                [&](const QJsonObject &op, Montaz::UndoFunction &undo, Montaz::UndoFunction &redo) {
+                    if (++step == 2) return false;
+                    return timeline->getClipEffectStackModel(op.value("instance_id").toString().toInt())
+                        ->appendEffectWithUndo(QStringLiteral("qtblend"), undo, redo)
+                        .first;
+                },
+                [&](const auto &, const auto &) { FAIL("Failed batch cannot commit"); });
+            REQUIRE_FALSE(result.isEmpty());
+            for (int id : ids)
+                REQUIRE(timeline->getClipEffectStackModel(id)->rowCount() == 0);
+            REQUIRE(stack->count() == 0);
+        }
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    pCore->setCurrentProfile(oldProfile);
+}
+
+TEST_CASE("Native object alignment survives serialization and export", "[Montaz]")
+{
+    const auto root = qEnvironmentVariable("MONTAZ_MATCH_QA_ROOT");
+    if (root.isEmpty()) {
+        SUCCEED("Set MONTAZ_MATCH_QA_ROOT for generated moving-object render checks");
+        return;
+    }
+    const auto oldProfile = pCore->getCurrentProfilePath();
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto undo = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(undo);
+    pCore->projectManager()->testSetDocument(&document);
+    REQUIRE(pCore->setCurrentProfile(QStringLiteral("atsc_1080p_2997")));
+    auto timeline = TimelineItemModel::construct(document.uuid(), undo);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int track = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, track));
+    QList<int> ids;
+    QStringList bids;
+    for (int i = 0; i < 2; ++i) {
+        auto producer = std::make_shared<Mlt::Producer>(
+            pCore->getProjectProfile(),
+            QDir(root).filePath(i == 0 ? QStringLiteral("round-object-a.mp4") : QStringLiteral("round-object-b.mp4")).toUtf8().constData());
+        REQUIRE(producer->is_valid());
+        auto bid = QString::number(bin->getFreeClipId());
+        Fun u = []() { return true; }, r = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(bid, producer, QStringLiteral("-1"), u, r));
+        int id = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/59").arg(bid), track, i * 60, id, true, false, false));
+        ids << id;
+        bids << bid;
+    }
+    REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+    undo->clear();
+    {
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot(), spec = adapter.matchRequest();
+        REQUIRE_FALSE(spec.isEmpty());
+        QFile input(QDir(root).filePath(QStringLiteral("controlled.json")));
+        REQUIRE(input.open(QIODevice::ReadOnly));
+        auto review = QJsonDocument::fromJson(input.readAll()).object();
+        REQUIRE(review.value("status") == "matched");
+        review["project_id"] = context.value("project_id");
+        review["sequence_id"] = context.value("sequence_id");
+        review["base_revision"] = context.value("revision");
+        auto operations = review.value("operations").toArray();
+        auto hashes = review.value("source_hashes").toObject();
+        QJsonObject rebound;
+        for (int i = 0; i < 2; ++i) {
+            auto op = operations[i].toObject();
+            op["instance_id"] = QString::number(ids[i]);
+            operations[i] = op;
+            rebound[bids[i]] = hashes.value(QString::number(i + 1));
+        }
+        review["operations"] = operations;
+        review["source_hashes"] = rebound;
+        REQUIRE(adapter.applyMatch(context, spec, review).isEmpty());
+        REQUIRE(undo->count() == 1);
+        auto geometry = [](Mlt::Producer &producer, int position) {
+            producer.seek(position);
+            std::unique_ptr<Mlt::Frame> frame(producer.get_frame());
+            mlt_image_format format = mlt_image_rgb;
+            int w = 640, h = 360;
+            auto pixels = frame->get_image(format, w, h);
+            REQUIRE(pixels);
+            REQUIRE(format == mlt_image_rgb);
+            int left = w, right = -1, top = h, bottom = -1, count = 0;
+            double sx = 0, sy = 0;
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const auto p = pixels + 3 * (y * w + x);
+                    if (p[0] > 65 && p[1] > 65 && p[2] < 50) {
+                        left = qMin(left, x);
+                        right = qMax(right, x);
+                        top = qMin(top, y);
+                        bottom = qMax(bottom, y);
+                        sx += x;
+                        sy += y;
+                        ++count;
+                    }
+                }
+            REQUIRE(count > 100);
+            return QList<double>{sx / count / w, sy / count / h, double(bottom - top + 1) / h, double(right - left + 1) / w};
+        };
+        const auto outgoing = geometry(*timeline->tractor(), 59), incoming = geometry(*timeline->tractor(), 60);
+        REQUIRE(std::abs(outgoing[0] - incoming[0]) < 0.007);
+        REQUIRE(std::abs(outgoing[1] - incoming[1]) < 0.007);
+        REQUIRE(std::abs(outgoing[2] - incoming[2]) < 0.015);
+        const auto scene = QDir(root).filePath(QStringLiteral("native-alignment.mlt"));
+        {
+            Mlt::Consumer serializer(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+            REQUIRE(serializer.is_valid());
+            serializer.connect(*timeline->tractor());
+            serializer.run();
+        }
+        Mlt::Producer reopened(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+        REQUIRE(reopened.is_valid());
+        const auto restored = geometry(reopened, 60);
+        for (int i = 0; i < 4; ++i)
+            REQUIRE(std::abs(restored[i] - incoming[i]) < 0.003);
+        undo->undo();
+        const auto original = geometry(*timeline->tractor(), 59);
+        REQUIRE(std::abs(original[0] - outgoing[0]) > 0.01);
+        undo->redo();
+        const auto redone = geometry(*timeline->tractor(), 59);
+        for (int i = 0; i < 4; ++i)
+            REQUIRE(std::abs(redone[i] - outgoing[i]) < 0.003);
+        const auto output = QDir(root).filePath(QStringLiteral("native-alignment.mp4"));
+        {
+            Mlt::Consumer renderer(pCore->getProjectProfile(), "avformat", output.toUtf8().constData());
+            REQUIRE(renderer.is_valid());
+            renderer.set("vcodec", "libx264");
+            renderer.set("crf", 18);
+            renderer.set("preset", "fast");
+            renderer.set("audio_off", 1);
+            renderer.set("real_time", -1);
+            renderer.set("in", 0);
+            renderer.set("out", 119);
+            renderer.set("terminate_on_pause", 1);
+            std::unique_ptr<Mlt::Producer> zone(timeline->tractor()->cut(0, 119));
+            renderer.connect(*zone);
+            renderer.run();
+        }
+        REQUIRE(QFileInfo(output).size() > 1000);
+        Mlt::Producer exported(pCore->getProjectProfile(), output.toUtf8().constData());
+        REQUIRE(exported.is_valid());
+        REQUIRE(exported.get_length() == 120);
+        const auto decoded = geometry(exported, 60);
+        for (int i = 0; i < 3; ++i)
+            REQUIRE(std::abs(decoded[i] - incoming[i]) < 0.007);
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    pCore->setCurrentProfile(oldProfile);
 }

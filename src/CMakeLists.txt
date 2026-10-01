@@ -216,6 +216,9 @@ ecm_add_app_icon(kdenlive ICONS ${ICON_FILES})
 
 ## Kdenlive Executable
 qt_add_executable(kdenlive MACOSX_BUNDLE main.cpp ${kdenlive_extra_SRCS} ${kdenlive})
+if(BUILD_MONTAZ_ASSISTANT)
+    add_dependencies(kdenlive montaz-tracker)
+endif()
 target_include_directories(kdenlive
     PRIVATE ${CMAKE_BINARY_DIR}
     )

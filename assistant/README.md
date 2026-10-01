@@ -221,10 +221,11 @@ output, cancellation of an uncooperative process, and redacted run records.
 These tests do not instantiate Kdenlive's timeline. See the native integration
 guide for the full application test gate.
 
-Protocol v1 deliberately supports only insertion. Mixing, subtitles, effects,
-trim/move, linked AV groups, and replacement proposals require explicit contract
-extensions plus native tests. A successful validation is not an editor apply
-acknowledgment or an assessment of editorial quality.
+Protocol v1 supports insertion; reviewed timing changes, captions and object
+alignment use separate, validated extensions described below. Mixing, linked AV
+editing and sequence replacement still require additional contracts and native
+tests. Successful validation is not an editor apply acknowledgment or an
+assessment of editorial quality.
 
 ## Reviewed speech captions
 
@@ -268,3 +269,37 @@ current captions; Original clears the override to restore their individual saved
 styles. Refine recognition and timing in Kdenlive's subtitle editor. Animated
 word captions, narrator generation, overlapping/processed audio and forced
 alignment remain future work.
+
+## Object-aligned match cuts (prototype)
+
+Select two adjacent video-only shots on one unlocked track and choose **Match
+cut**. Gemini suggests one graphic-match object pair; the native MLT/OpenCV helper
+tracks short windows around the cut. **Compare alignment** shows original and
+proposed boundary frames. **Apply alignment** adds editable Transform effects to
+both clips in one Undo. Source trims, shot timing and ordering stay unchanged.
+
+An empty pair finishes as **No match**. Unstable tracking, excessive cropping,
+missing media or provider errors never apply an effect. Stop kills helper work;
+valid completed pair evidence and empty selections are cached separately from
+scene/speech analysis. Run logs contain phases, model, cache use and outcome,
+without frames, paths or descriptions. The prototype requires progressive,
+square-pixel projects at up to 60 FPS, sources no larger than 128 MiB, and no
+existing bin/clip effects, persistent groups, speed changes or compositions.
+Zoom is capped at 2×; existing source letterboxing may remain.
+
+The development launcher supplies `MONTAZ_TRACKER` from the build's `bin/`
+directory. Building the editor with `BUILD_MONTAZ_ASSISTANT=ON` also builds the
+helper. No Python vision dependency or provider call is needed for the reproducible
+native quality check:
+
+```sh
+python3 assistant/tools/check_match_quality.py \
+  --craft-root /path/to/CraftRoot \
+  --build-root /path/to/kdenlive/build \
+  --output-dir /private/review/match-cut-check
+```
+
+This generates moving textured objects outside Git and exercises real tracking,
+source-frame offsets, native application, Undo/Redo, effect serialization and
+export. General portrait framing, manual anchor correction, multi-pair selection,
+beat/phrase detection, whip pans, object wipes and speed ramps remain future work.

@@ -10,6 +10,7 @@
 #include "core.h"
 #include "doc/docundostack.hpp"
 #include "doc/kdenlivedoc.h"
+#include "effects/effectsrepository.hpp"
 #include "effects/effectstack/model/effectstackmodel.hpp"
 #include "mainwindow.h"
 #include "project/projectmanager.h"
@@ -553,4 +554,89 @@ QString Montaz::EditorAdapter::captionStyle(const QString &preset)
     }
     if (model->getForceStyle() != style) model->setForceStyle(style);
     return {};
+}
+
+QJsonObject Montaz::EditorAdapter::matchRequest()
+{
+    const auto current = snapshot();
+    const auto timeline = m_timeline.lock();
+    if (current.isEmpty() || !timeline || timeline->getCompositionsCount() || !pCore->getProjectProfile().progressive() ||
+        pCore->getProjectProfile().sample_aspect_num() != pCore->getProjectProfile().sample_aspect_den())
+        return {};
+    Mlt::Filter transform(pCore->getProjectProfile(), "qtblend");
+    if (!EffectsRepository::get()->exists(QStringLiteral("qtblend")) || !transform.is_valid()) return {};
+    const auto selected = timeline->getCurrentSelection();
+    if (selected.size() != 2) return {};
+    std::vector<QJsonObject> clips;
+    for (int id : selected) {
+        if (!timeline->isClip(id) || timeline->hasPersistentGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 ||
+            timeline->getClipSpeed(id) != 1.0 || timeline->getClipEffectStackModel(id)->rowCount() > 0 ||
+            timeline->getClipState(id).first != PlaylistState::VideoOnly)
+            return {};
+        const auto asset = pCore->projectItemModel()->getClipByBinID(timeline->getClipBinId(id));
+        if (!asset || asset->getEffectStack()->rowCount() > 0) return {};
+        const int track = timeline->getClipTrackId(id);
+        if (timeline->isAudioTrack(track)) return {};
+        clips.push_back({{"instance_id", QString::number(id)},
+                         {"bin_id", timeline->getClipBinId(id)},
+                         {"track_id", QString::number(track)},
+                         {"start_frame", timeline->getClipPosition(id)},
+                         {"in_frame", timeline->getClipIn(id)},
+                         {"duration_frames", timeline->getClipPlaytime(id)}});
+    }
+    std::sort(clips.begin(), clips.end(), [](const auto &a, const auto &b) { return a.value("start_frame").toInt() < b.value("start_frame").toInt(); });
+    QJsonArray values;
+    for (const auto &c : clips)
+        values.append(c);
+    const auto size = pCore->getCurrentFrameSize();
+    QJsonObject spec{{"clips", values}, {"width", size.width()}, {"height", size.height()}};
+    return validateMatchRequest(current, spec).isEmpty() ? spec : QJsonObject{};
+}
+
+QString Montaz::EditorAdapter::applyMatch(const QJsonObject &context, const QJsonObject &spec, const QJsonObject &review)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot() != context || matchRequest() != spec || !validateMatchReview(context, spec, review).isEmpty() || review.value("status") != "matched")
+        return QStringLiteral("invalid_match_review");
+    const auto request = review.value("request_id").toString();
+    if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
+    const auto hashes = review.value("source_hashes").toObject();
+    const auto keys = hashes.keys();
+    const auto sources = mediaSources(context, QSet<QString>(keys.begin(), keys.end()));
+    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
+        QFile file(sources.value(it.key()).toString());
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024) return QStringLiteral("media_changed");
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        if (!hash.addData(&file) || QString::fromLatin1(hash.result().toHex()) != it.value().toString()) return QStringLiteral("media_changed");
+    }
+    const auto timeline = m_timeline.lock();
+    const int width = spec.value("width").toInt(), height = spec.value("height").toInt();
+    const auto result = applyInsertBatch(
+        review.value("operations").toArray(),
+        [timeline, width, height](const QJsonObject &op, UndoFunction &undo, UndoFunction &redo) {
+            const int id = op.value("instance_id").toString().toInt();
+            const auto stack = timeline->getClipEffectStackModel(id);
+            if (!stack->appendEffectWithUndo(QStringLiteral("qtblend"), undo, redo).first) return false;
+            const auto model = stack->getAssetModelById(QStringLiteral("qtblend"));
+            if (!model) return false;
+            QStringList values;
+            for (const auto v : op.value("keyframes").toArray()) {
+                const auto k = v.toObject();
+                const double s = k.value("scale").toDouble();
+                values.append(QStringLiteral("%1=%2 %3 %4 %5 1")
+                                  .arg(timeline->getClipIn(id) + k.value("frame").toInt())
+                                  .arg(k.value("x").toDouble() * width, 0, 'f', 6)
+                                  .arg(k.value("y").toDouble() * height, 0, 'f', 6)
+                                  .arg(s * width, 0, 'f', 6)
+                                  .arg(s * height, 0, 'f', 6));
+            }
+            model->setParameter(QStringLiteral("rect"), values.join(QLatin1Char(';')));
+            model->setParameter(QStringLiteral("distort"), QStringLiteral("0"));
+            return true;
+        },
+        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Align objects across a match cut")); });
+    if (result.isEmpty()) m_appliedRequests.insert(request);
+    if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
+    invalidate();
+    return result;
 }

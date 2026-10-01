@@ -226,3 +226,43 @@ style presets are bounded prototypes; neither establishes word timing accuracy.
 Headless project loading initializes the native subtitle model directly when no
 main window exists; desktop loading retains the existing subtitle editor path.
 Both paths preserve native subtitle properties for rendering.
+
+## Object-match boundary (experimental)
+
+`propose_match` captures exactly two selected adjacent video-only clips, on one
+unlocked track, with their original trims and a progressive square-pixel canvas.
+Existing clip/bin effects, real groups, speed changes and compositions are excluded;
+Kdenlive's temporary multi-selection group is supported. No clips are reordered,
+retimed or inserted. General portrait framing remains deferred.
+
+A separate `montaz-tracker` executable reuses the installed MLT/OpenCV decoder and
+CSRT tracker; Python needs no vision package. Its native project-frame decoding
+supplies bounded images to one Gemini object-pair request. One-second boundary
+windows are tracked at every project frame (up to 60 FPS). Low-frequency patch
+correlation rejects flat/disappearing regions; shape, motion and scale checks reject
+unstable tracks. These checks are conservative proxies, not calibrated object
+identity or tracking-confidence guarantees.
+
+Content-addressed pair evidence includes source hashes, absolute source trims,
+canvas, rational FPS, model and algorithm version. Valid empty pairs are cached;
+tracking/provider failures are not accepted as scene evidence. Only selected
+sources are read, with a prototype 128 MiB per-source limit. Existing visual and
+speech analyses are preserved. Ordered finding/tracking progress, a 90-second run
+cap, a clean worker exit and explicit terminal outcomes keep Apply unavailable
+while work is running; Stop terminates native helper work and discards late results.
+
+Protocol-v3 reviews carry only allowlisted uniform numeric transform keyframes,
+source identities, native clip IDs and bounded JPEG boundary previews. Position and
+size share a common subject anchor, with at most 2× zoom and canvas coverage checks.
+The dock compares original/aligned boundary images; it is not a second player.
+The adapter rechecks selection, revision, sources, eligibility and native effect
+availability before adding two editable `qtblend` effects in one rollback-capable
+Undo batch. Existing source letterboxing can remain. Beat cuts, whips, occlusion
+wipes, speed ramps, manual anchors and multi-pair sequence optimization remain
+planned; no arbitrary model-provided effect expression is executed.
+
+CSRT size estimates are smoothed over five frames while retaining measured
+centers; large jumps still reject. The worker checks video-stream duration before
+tracking an uncached pair, so a longer audio/container tail cannot silently become
+a frozen visual match. Complete negative pairs are cached; tracking/provider
+errors are terminal and do not populate the cache.

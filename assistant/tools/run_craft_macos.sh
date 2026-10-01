@@ -34,5 +34,6 @@ for montaz_plugins in plugins/mlt lib/mlt-7 lib/mlt; do
         break
     fi
 done
+export MONTAZ_TRACKER="$PWD/bin/montaz-tracker"
 export KDENLIVE_ASSISTANT_PYTHON="${KDENLIVE_ASSISTANT_PYTHON:-$CRAFT_PYTHON_BIN}"
 exec "$PWD/bin/kdenlive.app/Contents/MacOS/kdenlive" "$@"

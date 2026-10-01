@@ -278,3 +278,37 @@ estimate. This is an integration checkpoint, not evidence of improved film
 quality. Native existing-edit replacement/refinement, explicit recipe coverage,
 perceptual comparison and narration/ducking remain pending. Portrait framing and
 packaging/publication remain deferred.
+
+
+## Object-match milestone — October 1
+
+The user accepted a first object-aligned match-cut prototype before the remaining
+beat/whip/wipe/ramp work. Two adjacent selected video-only instances are captured
+against the native revision. Gemini selects one compatible object pair or an
+explicit empty answer; a separate bounded `montaz-tracker` uses existing MLT and
+OpenCV CSRT to decode/track every frame of the outgoing last/incoming first second.
+Uniform native Transform crops align centers and apparent heights, capped at 2×,
+with shape, appearance, motion and canvas-coverage gates. Size smoothing prevents
+integer tracking-box jitter becoming breathing zoom. Video-stream tail checks
+avoid frozen audio-only tails. The separate `object-match-2` cache retains complete
+pair evidence by content, trim, FPS, canvas and model; source hashes are rechecked.
+
+The right dock has Match cut, a two-by-two original/aligned boundary comparison,
+explicit Apply and Stop. Native application preserves source/timing/IDs, checks
+selection, revision, replay and file identity, and commits one Undo. Persistent
+clip groups remain ineligible; temporary multi-selection is supported through a
+small TimelineModel query. No manual anchor correction, full-bin candidate search,
+beat measurement, whip/wipe recognition or time-remap proposal exists yet.
+
+The editor/helper compile with Craft. 142 Python checks run (140 pass, two optional
+native checks skipped); both optional real tracker checks pass separately. 38 Qt
+transport and seven chat checks pass. Native `assistanttest` passes; generated
+moving-disc QA exercises real tracking, native Apply/Undo/Redo, MLT serialization
+and a 120-frame H.264 export at 30000/1001 FPS, with boundary center/height checks.
+Desktop Gemini selection, comparison, Apply and Undo/Redo passed; the saved test
+project contains both 30-frame native animations. A fresh-process desktop reopen loaded both native effects and cleared the
+assistant session; the original Goa review project remains untouched. The headless tests enable Qt video effects only for this
+target; the initial crashes were test setup/cleanup defects, not editor failures.
+Two selected cuts in the latest Goa draft returned no compatible objects, which
+correctly leaves their timeline unchanged. These checks prove the narrow
+integration, not better travel-film quality or identity tracking on all footage.

@@ -270,3 +270,32 @@ the next editorial gates; do not present this export as a quality benchmark.
 132 Python, 35 Qt transport, 7 chat checks and native `assistanttest` pass. The
 editor and scoped plugin compile. Plugin identity regressions reject changed SDK
 binaries even at the same version, changed architecture/location, patch or plugin.
+
+
+## Object-match checkpoint
+
+The first transition prototype works on two selected adjacent video-only shots.
+A live Gemini run selected matching textured discs on controlled footage; native
+CSRT tracked the boundary windows and the editor displayed original/aligned frames.
+Apply, one Undo and Redo were exercised in the desktop; saving retained both
+30-frame Transform animations. A fresh-process reopen verifies native loading.
+
+`assistant/tools/check_match_quality.py` generates controlled moving-disc footage
+outside Git, substitutes only semantic seed selection, then exercises real native
+tracking, application, Undo/Redo, MLT serialization and export. The 1920×1080
+H.264 export contains exactly 120 frames at 30000/1001 FPS. Boundary centers
+agree within 0.007 of the canvas and subject heights within 0.015; decoded export
+and reloaded native geometry retain the alignment. The optional helper tests also
+check nonzero source trims within three source pixels and reject flat patches.
+
+Two existing Goa cuts (river/pool and pool/coast) returned explicit no-match
+answers in 7.86 and 8.31 seconds. Their complete negative evidence is cached;
+no forced alignment or effects are added. We have not searched all possible Goa
+pairs or produced a better complete travel film. Tracking uses a conservative
+appearance proxy, not a calibrated identity/confidence score. Boundary comparison
+is static; review movement in Kdenlive's project monitor after Apply.
+
+Validation: 140 passing Python checks plus two optional native helper checks;
+38 Qt transport, seven chat checks, native `assistanttest`, and controlled rendered
+QA pass. Beat/phrase analysis, candidate search, manual anchors, directional whips,
+object wipes and speed ramps remain pending. Generic pacing presets remain in use.

@@ -21,6 +21,8 @@ public:
     QString contextKey();
     QJsonObject snapshot();
     QJsonObject mediaSources(const QJsonObject &snapshot, const QSet<QString> &selected = {});
+    QJsonObject matchRequest();
+    QString applyMatch(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);
     QJsonObject captionRequest();
     QJsonObject audioSources(const QJsonObject &snapshot, const QSet<QString> &selected);
     QString applyCaptions(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);

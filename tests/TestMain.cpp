@@ -47,7 +47,9 @@ QString getMltRepositoryPath()
 int main(int argc, char *argv[])
 {
     QHashSeed::setDeterministicGlobalSeed();
+#ifndef MONTAZ_TEST_NATIVE_TRANSFORM
     qputenv("MLT_REPOSITORY_DENY", "libmltqt:libmltglaxnimate");
+#endif
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("kdenlive"));
     qSetMessagePattern(QStringLiteral("%{time hh:mm:ss.zzz } %{file}:%{line} -- %{message}"));
@@ -69,6 +71,9 @@ int main(int argc, char *argv[])
     // if Kdenlive is not installed, ensure we have one keyframable effect
     EffectsRepository::get()->reloadCustom(QDir(sourcesPath).filePath(QStringLiteral("../data/effects/audiobalance.xml")));
 
+#ifdef MONTAZ_TEST_NATIVE_TRANSFORM
+    EffectsRepository::get()->reloadCustom(QDir(sourcesPath).filePath(QStringLiteral("../data/effects/qtblend.xml")));
+#endif
     int result = Catch::Session().run(argc, argv);
     pCore->cleanup();
     pCore->mediaUnavailable.reset();

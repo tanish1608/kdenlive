@@ -120,3 +120,23 @@ phone clips exercise it. The original footage and earlier project remain preserv
 
 Each gate needs focused regressions plus an actual editor/output check. Provider
 success and passing unit tests alone do not establish editorial quality.
+
+## Object-match prototype (October 1)
+
+- [x] Select two adjacent native video instances; keep frame timing unchanged.
+- [x] Reuse MLT decoding/OpenCV CSRT in a bounded, cancellable helper process.
+- [x] Ask Gemini for one object pair; allow an explicit empty answer.
+- [x] Cache successful pair evidence separately by content, trim, canvas, FPS,
+  model and algorithm version; preserve existing scene/speech caches.
+- [x] Solve uniform position/scale keyframes with a 2× zoom ceiling and no newly
+  exposed canvas edges. Reject flat regions, unstable appearance and geometry.
+- [x] Add boundary comparison and reviewed native Transform application.
+- [x] Verify native Apply/Undo/Redo, serialization and exported geometry checks.
+- [x] Exercise desktop comparison, Apply, Undo/Redo and a fresh-process reopen.
+- [ ] Search multiple candidate pairs, allow manual anchor correction, measure
+  musical beats/phrases, then add directional motion/wipe/ramp proposals.
+
+Two adjacent cuts in the latest Goa draft returned no compatible objects. The
+controlled moving-disc pair returned a tracked match. Neither is a travel-film
+quality approval. Generic travel pacing remains until transition selection is
+verified beyond this deliberately narrow prototype.

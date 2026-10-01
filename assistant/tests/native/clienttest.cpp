@@ -192,6 +192,57 @@ void fakeWorker(const QString &path, const QByteArray &script)
 }
 } // namespace
 
+namespace {
+QJsonObject matchSpec()
+{
+    QJsonArray clips;
+    for (int i = 0; i < 2; ++i)
+        clips.append(QJsonObject{{"instance_id", QString::number(11 + i)},
+                                 {"bin_id", QString::number(1 + i)},
+                                 {"track_id", "1"},
+                                 {"start_frame", i * 60},
+                                 {"in_frame", 5},
+                                 {"duration_frames", 60}});
+    return {{"width", 1920}, {"height", 1080}, {"clips", clips}};
+}
+QJsonObject matchSnapshot()
+{
+    auto value = snapshot();
+    QJsonArray occupied;
+    for (const auto v : matchSpec()["clips"].toArray()) {
+        auto c = v.toObject();
+        c.remove("bin_id");
+        c.remove("in_frame");
+        occupied.append(c);
+    }
+    value["occupied"] = occupied;
+    return value;
+}
+QJsonObject matchReview()
+{
+    QJsonArray operations;
+    for (int i = 0; i < 2; ++i) {
+        QJsonArray keyframes;
+        for (int j = 0; j < 30; ++j)
+            keyframes.append(QJsonObject{{"frame", i == 0 ? 30 + j : j}, {"x", -0.025}, {"y", -0.025}, {"scale", 1.05}});
+        operations.append(QJsonObject{{"instance_id", QString::number(11 + i)}, {"keyframes", keyframes}});
+    }
+    return {{"request_id", "request"},
+            {"project_id", "project"},
+            {"sequence_id", "sequence"},
+            {"base_revision", 2},
+            {"frame_rate", snapshot()["frame_rate"]},
+            {"protocol_version", 3},
+            {"reason", "private object explanation"},
+            {"status", "matched"},
+            {"cached", false},
+            {"operations", operations},
+            {"source_hashes", QJsonObject{{"1", QString(64, 'a')}, {"2", QString(64, 'b')}}},
+            {"target", QJsonObject{{"x", 0.5}, {"y", 0.5}, {"height", 0.2}}},
+            {"preview", QJsonObject{{"outgoing", "/9j/2Q=="}, {"incoming", "/9j/2Q=="}}}};
+}
+} // namespace
+
 class ClientTest : public QObject
 {
     Q_OBJECT
@@ -202,6 +253,104 @@ private Q_SLOTS:
         QStandardPaths::setTestModeEnabled(true);
     }
     void cleanupTestCase() { QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).removeRecursively(); }
+    void matchContractsRejectUnsafeTransformsAndStaleIdentity()
+    {
+        QVERIFY(Montaz::validateMatchRequest(matchSnapshot(), matchSpec()).isEmpty());
+        QVERIFY(Montaz::validateMatchReview(matchSnapshot(), matchSpec(), matchReview()).isEmpty());
+        for (const auto change : {QJsonObject{{"base_revision", 3}}, QJsonObject{{"protocol_version", 1}}, QJsonObject{{"status", "approved"}},
+                                  QJsonObject{{"preview", QJsonObject{{"outgoing", "invalid"}, {"incoming", "/9j/2Q=="}}}}}) {
+            auto review = matchReview();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                review[it.key()] = it.value();
+            QVERIFY(!Montaz::validateMatchReview(matchSnapshot(), matchSpec(), review).isEmpty());
+        }
+        for (const auto change : {QJsonObject{{"x", 0.1}}, QJsonObject{{"scale", 3}}, QJsonObject{{"scale", true}}, QJsonObject{{"frame", 0}},
+                                  QJsonObject{{"expression", "arbitrary"}}}) {
+            auto review = matchReview();
+            auto ops = review["operations"].toArray();
+            auto op = ops[0].toObject();
+            auto keys = op["keyframes"].toArray();
+            auto k = keys[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                k[it.key()] = it.value();
+            keys[0] = k;
+            op["keyframes"] = keys;
+            ops[0] = op;
+            review["operations"] = ops;
+            QVERIFY(!Montaz::validateMatchReview(matchSnapshot(), matchSpec(), review).isEmpty());
+        }
+    }
+    void matchTransportRequiresOrderedProgressTerminalEventsAndCleanExit()
+    {
+        for (int fault = 0; fault < 6; ++fault) {
+            auto review = matchReview();
+            if (fault == 1) {
+                review["status"] = "no_match";
+                review["operations"] = QJsonArray{};
+            }
+            QByteArray worker = R"PY(import json,sys
+r=json.loads(sys.stdin.readline())
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n in (1,2):send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'match','status':'running','reason':''})
+PROGRESS
+for n in (3,4):send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==4 else 'match','status':'completed','reason':''})
+review=json.loads(r'''REVIEW''')
+review['request_id']=r['request_id']
+FAULT
+send({'type':'match','review':review})
+EXIT
+)PY";
+            worker.replace("REVIEW", QJsonDocument(review).toJson(QJsonDocument::Compact));
+            worker.replace(
+                "PROGRESS",
+                fault == 2
+                    ? QByteArray("pass")
+                    : QByteArray("for phase in ('finding','tracking'):send({'type':'match_progress','phase':phase,'cached':False,'model':'gemini-test'})"));
+            worker.replace("FAULT", fault == 3 ? "review['base_revision']=3" : fault == 4 ? "review['operations'][0]['keyframes'][0]['scale']=4" : "pass");
+            worker.replace("EXIT", fault == 5 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::matchReady), failed(&client, &Montaz::WorkerClient::failed);
+            QVERIFY(client.start(matchSnapshot(),
+                                 {{"match", matchSpec()}, {"sources", QJsonObject{{"1", "/private/source1.mp4"}, {"2", "/private/source2.mp4"}}}}));
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            QCOMPARE(ready.count(), fault < 2 ? 1 : 0);
+            QCOMPARE(failed.count(), fault < 2 ? 0 : 1);
+        }
+        const auto logs = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+        for (const auto name : QDir(logs).entryList({"*.jsonl"}, QDir::Files)) {
+            QFile file(logs + name);
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            const auto data = file.readAll();
+            QVERIFY(!data.contains("private object explanation"));
+            QVERIFY(!data.contains("/private/source"));
+            QVERIFY(!data.contains("/9j/2Q=="));
+        }
+    }
+    void stoppingMatchTrackingDiscardsLateResults()
+    {
+        QTemporaryDir temp;
+        fakeWorker(temp.path(), R"PY(import json,sys,time,signal
+r=json.loads(sys.stdin.readline())
+signal.signal(signal.SIGTERM,lambda *_:None)
+def send(value):print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n in (1,2):send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'match','status':'running','reason':''})
+for phase in ('finding','tracking'):send({'type':'match_progress','phase':phase,'cached':False,'model':'gemini-test'})
+time.sleep(10)
+)PY");
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+        QSignalSpy progress(&client, &Montaz::WorkerClient::eventReceived), ready(&client, &Montaz::WorkerClient::matchReady),
+            stopped(&client, &Montaz::WorkerClient::stopped);
+        QVERIFY(
+            client.start(matchSnapshot(), {{"match", matchSpec()}, {"sources", QJsonObject{{"1", "/private/source1.mp4"}, {"2", "/private/source2.mp4"}}}}));
+        QTRY_COMPARE_WITH_TIMEOUT(progress.count(), 4, 3000);
+        client.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
+        QCOMPARE(ready.count(), 0);
+    }
     void captionsBindAudioSourceNativeIntervalsAndSafeText()
     {
         QVERIFY(Montaz::validateCaptionRequest(captionSnapshot(), captionSpec()).isEmpty());
