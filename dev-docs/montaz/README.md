@@ -15,6 +15,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 4. [Upstream build guide](../build.md): native toolchain requirements.
 5. [macOS setup](macos-setup.md): beginner instructions for dependencies, build, and launch.
 6. [Implementation checklist](work-plan.md): chat milestone and footage-quality gates.
+7. [Output review](quality-review.md): exported footage, measurements and remaining quality gaps.
 
 ## Current state
 
@@ -37,10 +38,13 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Native tests pass; desktop preview, Apply, Undo/Redo, save/reopen, and seeking
   were exercised with six silent synthetic clips at 24/25/30 fps, including
   portrait sources. macOS SDK/test loading fixes are included.
-- Still pending: export validation, additional native failure checks,
-  narration, audio pairing, ElevenLabs music/effects, subtitle styling, and deeper
-  travel recipe execution. The planner uses sampled visual evidence and inserts
-  video only; real-footage editorial quality and exported output need review.
+- Temporal analysis uses bounded silent video windows and validated usable trims.
+  The preview explains shot choices and footage feasibility; logs retain numeric
+  editorial metrics. A native Goa export was reviewed at all six cut boundaries.
+- Still pending: framing, additional native failure checks, narration, audio
+  pairing, ElevenLabs music/effects, subtitle styling, and deeper travel recipe
+  execution. The exported draft is silent with pillarboxed portrait footage;
+  passing integration checks does not make it a finished travel film.
 - See [native integration](native-integration.md) for exact verification limits.
 
 ## First integration milestone
@@ -54,4 +58,5 @@ cannot insert a second copy of the sequence.
 The diagnostic remains available with `MONTAZ_ASSISTANT_DEMO=1`. The normal panel
 uses Gemini. Synthetic live checks produced three grounded shots; a repeat reused
 all analyses (9.16 s first run, 2.14 s cached). Native UI planning, Apply, Stop,
-and retry were exercised. Continue with real-footage quality review and export.
+and retry were exercised. The subsequent Goa output check is recorded in
+[quality review](quality-review.md).

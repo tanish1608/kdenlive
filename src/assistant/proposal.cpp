@@ -103,6 +103,38 @@ QString Montaz::validateSnapshot(const QJsonObject &snapshot)
     return {};
 }
 
+QString Montaz::validateEditorialReview(const QJsonObject &snapshot, const QJsonObject &proposal, const QJsonObject &review)
+{
+    if (!fields(review, {QStringLiteral("requested_frames"), QStringLiteral("available_frames"), QStringLiteral("skipped_assets"), QStringLiteral("shots")}) ||
+        !integer(review.value(QStringLiteral("requested_frames")), 1) || !integer(review.value(QStringLiteral("available_frames")), 1) ||
+        !integer(review.value(QStringLiteral("skipped_assets"))) || !review.value(QStringLiteral("shots")).isArray())
+        return invalid();
+    const auto shots = review.value(QStringLiteral("shots")).toArray();
+    const auto operations = proposal.value(QStringLiteral("operations")).toArray();
+    int videos = 0;
+    for (const auto value : snapshot.value(QStringLiteral("assets")).toArray())
+        videos += value.toObject().value(QStringLiteral("has_video")).toBool();
+    if (shots.size() != operations.size() || shots.size() + review.value(QStringLiteral("skipped_assets")).toInteger() > videos) return invalid();
+    qint64 planned = 0;
+    const QStringList roles{QStringLiteral("establishing"), QStringLiteral("detail"), QStringLiteral("action"), QStringLiteral("closing"),
+                            QStringLiteral("other")};
+    for (int i = 0; i < shots.size(); ++i) {
+        const auto shot = shots[i].toObject();
+        const auto op = operations[i].toObject();
+        const auto reason = shot.value(QStringLiteral("reason"));
+        if (!fields(shot, {QStringLiteral("instance_id"), QStringLiteral("role"), QStringLiteral("quality"), QStringLiteral("reason")}) ||
+            shot.value(QStringLiteral("instance_id")) != op.value(QStringLiteral("instance_id")) ||
+            !roles.contains(shot.value(QStringLiteral("role")).toString()) || !integer(shot.value(QStringLiteral("quality")), 50) ||
+            shot.value(QStringLiteral("quality")).toInt() > 100 || !reason.isString() || reason.toString().trimmed().isEmpty() ||
+            reason.toString().size() > 300)
+            return invalid();
+        planned += op.value(QStringLiteral("duration_frames")).toInteger();
+    }
+    if (planned > review.value(QStringLiteral("requested_frames")).toInteger() || planned > review.value(QStringLiteral("available_frames")).toInteger())
+        return invalid();
+    return {};
+}
+
 QString Montaz::validateProposal(const QJsonObject &snapshot, const QJsonObject &proposal, const QSet<QString> &appliedRequests)
 {
     if (!validateSnapshot(snapshot).isEmpty()) return invalid();

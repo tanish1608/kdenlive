@@ -73,7 +73,7 @@ rejection, lock/unlock invalidation, and source bounds. Desktop preview, Apply,
 Undo/Redo, save/reopen, and seeking to the first cut were exercised using six
 silent synthetic clips with mixed frame rates and orientations.
 
-**Still unverified:** exported output, native insertion-failure injection,
+**Still unverified:** native insertion-failure injection,
 all project-switch/relink/profile interactions, and linked audio. The feature
 remains off by default. A Qt accessibility crash occurred while inspecting a
 closing file dialog; this is an unresolved SDK/UI automation limitation.
@@ -84,8 +84,8 @@ The desktop exercised Gemini planning/Apply, duration shortfall, Stop and retry.
 These results demonstrate integration; they do not establish real-footage quality.
 
 On this Mac use `assistant/tools/run_craft_macos.sh` to launch the development
-build with Craft's library, MLT, and effects paths. The launcher does not package
-or change cached dependencies. Native CTest configures the macOS SDK paths itself.
+build with Craft's library, MLT, and effects paths. The launcher stages upstream runtime data and the built render helper into the
+development bundle; it does not package or change cached dependencies. Native CTest configures the macOS SDK paths itself.
 
 Before connecting providers, pass `assistanttest` and manually check:
 
@@ -107,3 +107,16 @@ eight-shot refined draft, Apply/Undo/Redo, first-cut seeking, Stop and project
 conversation reset. The brief refinements stay within the 2,000-character worker
 contract; oversized drafts are retained and explained. These remain sampled
 visual edits, not verified final films with framing, audio or captions.
+
+The temporal-analysis milestone passes 63 Python checks, 22 Qt transport checks
+and 7 chat checks (including fixtures), plus native `assistanttest` and
+`transcodetest`. The latter performs real FFmpeg conversions with synthetic
+multi-stream/unsupported-audio/silent inputs and a failing encoder. A native Goa
+run reused all 12 eligible analyses, skipped 3 micro-clips, and proposed 7 shots
+(474 frames). Apply/Undo/Redo, save/reopen, preset switching and first-cut seeking
+were exercised. The native H.264 export contains exactly 474 frames at 30000/1001
+FPS; all six exported cut boundaries were inspected. See
+[quality review](quality-review.md). This remains a silent, partially pillarboxed
+draft. An accessibility inspection immediately after closing Rendering reproduced
+the SDK/macOS AX hierarchy crash; reopening the saved project succeeded. This
+limitation is still unresolved and must not be counted as a clean UI test run.

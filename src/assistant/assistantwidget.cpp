@@ -81,6 +81,12 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     m_preview->setTextElideMode(Qt::ElideMiddle);
     m_preview->setMaximumHeight(135);
     previewLayout->addWidget(m_preview);
+    m_shotReason = new QLabel(m_previewCard);
+    m_shotReason->setTextFormat(Qt::PlainText);
+    m_shotReason->setWordWrap(true);
+    previewLayout->addWidget(m_shotReason);
+    connect(m_preview, &QListWidget::currentItemChanged, this,
+            [this](QListWidgetItem *item) { m_shotReason->setText(item ? item->data(Qt::UserRole).toString() : QString()); });
     m_apply = new QPushButton(QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Apply edit"), m_previewCard);
     m_apply->setEnabled(false);
     previewLayout->addWidget(m_apply);
@@ -146,6 +152,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             reply(i18n("Gemini is unavailable or rate limited. Completed analysis was retained; try again later."));
         else if (code == QStringLiteral("invalid_analysis") || code == QStringLiteral("invalid_plan") || code == QStringLiteral("invalid_model_response"))
             reply(i18n("Gemini returned unusable evidence or cuts. No edit was applied. Try a different brief."));
+        else if (code == QStringLiteral("insufficient_footage"))
+            reply(i18n("No usable video ranges are long enough for this travel edit. Add clearer clips of at least one second. No edit was applied."));
         else
             reply(i18n("Planning could not finish. Check your source files and unlocked video tracks. No edit was applied."));
     });
@@ -177,6 +185,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         const double secondsPerFrame = double(rate.value(QStringLiteral("denominator")).toInt()) / rate.value(QStringLiteral("numerator")).toInt();
         int frames = 0;
         int index = 0;
+        const auto review = m_worker->editorialReview();
+        const auto shotReviews = review.value(QStringLiteral("shots")).toArray();
         for (const auto value : proposal.value(QStringLiteral("operations")).toArray()) {
             const auto op = value.toObject();
             const int duration = op.value(QStringLiteral("duration_frames")).toInt();
@@ -188,7 +198,20 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                                                         QString::number(op.value(QStringLiteral("in_frame")).toInt() * secondsPerFrame, 'f', 2),
                                                         QString::number((op.value(QStringLiteral("in_frame")).toInt() + duration) * secondsPerFrame, 'f', 2),
                                                         QString::number(op.value(QStringLiteral("start_frame")).toInt() * secondsPerFrame, 'f', 2)));
+            if (!shotReviews.isEmpty()) {
+                const auto shotReview = shotReviews[index - 1].toObject();
+                const auto role = shotReview.value(QStringLiteral("role")).toString();
+                const auto label = role == QStringLiteral("establishing") ? i18n("Place")
+                                   : role == QStringLiteral("detail")     ? i18n("Detail")
+                                   : role == QStringLiteral("action")     ? i18n("Activity")
+                                   : role == QStringLiteral("closing")    ? i18n("Ending")
+                                                                          : i18n("Shot");
+                const auto reason = i18n("%1 · %2", label, shotReview.value(QStringLiteral("reason")).toString());
+                m_preview->item(index - 1)->setData(Qt::UserRole, reason);
+                m_preview->item(index - 1)->setToolTip(m_preview->item(index - 1)->toolTip() + QLatin1Char('\n') + reason);
+            }
         }
+        m_preview->setCurrentRow(0);
         setTask(0, i18n("Done"));
         setTask(1, i18n("Done"));
         setTask(2, i18n("Ready"));
@@ -196,6 +219,13 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_apply->setEnabled(true);
         m_previewCard->show();
         const double seconds = frames * secondsPerFrame;
+        if (!review.isEmpty()) {
+            m_chat->addMessage(i18n("Assistant"),
+                               i18n("Your footage offers up to %1 seconds of distinct usable shots for this style. %2 sources were excluded because they "
+                                    "were too short, unsuitable, or duplicates. Select a proposed shot to see why it belongs in the story.",
+                                    QString::number(review.value(QStringLiteral("available_frames")).toInt() * secondsPerFrame, 'f', 1),
+                                    review.value(QStringLiteral("skipped_assets")).toInt()));
+        }
         reply(seconds + 0.1 < m_requestedSeconds ? i18n("I’ve proposed %1 shots totaling %2 seconds of your requested %3. I kept the edit shorter rather than "
                                                         "repeating footage. Review the shots above, then apply or send a refinement.",
                                                         index, QString::number(seconds, 'f', 1), m_requestedSeconds)
@@ -334,4 +364,5 @@ void Montaz::AssistantWidget::clearProposal()
     m_apply->setEnabled(false);
     m_previewCard->hide();
     m_preview->clear();
+    m_shotReason->clear();
 }

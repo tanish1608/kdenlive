@@ -7,6 +7,7 @@
 #include <QString>
 
 namespace Montaz {
+QString validateEditorialReview(const QJsonObject &snapshot, const QJsonObject &proposal, const QJsonObject &review);
 constexpr int MaxMessageBytes = 1024 * 1024;
 
 // Empty result means valid. Validation never mutates the editor.

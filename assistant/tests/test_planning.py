@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Montaz contributors
+import base64
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ from montaz_assistant.planning import (
     candidates,
     plan_media,
     proposal_from_plan,
+    validate_analysis,
 )
 from montaz_assistant.protocol import decode, encode, to_wire
 
@@ -50,6 +52,8 @@ class PlanningTests(unittest.TestCase):
                     "description": "A red test image",
                     "role": "other",
                     "quality": 80,
+                    "trim_in": 0,
+                    "trim_out": 50,
                 }
             ]
         }
@@ -57,6 +61,7 @@ class PlanningTests(unittest.TestCase):
         self.provider.generate.return_value = self.observation
         self.media = MediaTools()
         self.media.image = Mock(return_value={"text": "synthetic frame"})
+        self.media.video = Mock(return_value={"text": "synthetic video"})
         self.media.visual_frames = Mock(side_effect=lambda path, rate, maximum: maximum)
 
     def analysis(self, **changes):
@@ -80,7 +85,7 @@ class PlanningTests(unittest.TestCase):
         self.assertTrue(hit)
         self.assertEqual(first, second)
         self.assertEqual(self.provider.generate.call_count, 1)
-        self.assertEqual(self.media.image.call_count, 2)
+        self.assertEqual(self.media.video.call_count, 1)
         cache = next((self.root / "cache").glob("*.json"))
         self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
         self.assertNotIn(str(new), cache.read_text())
@@ -153,11 +158,23 @@ class PlanningTests(unittest.TestCase):
             capture_output=True,
         )
         media = MediaTools()
+        self.provider.generate.return_value = {
+            "windows": [dict(self.observation["windows"][0], trim_out=25)]
+        }
         with self.assertRaisesRegex(AssistantError, "media_unreadable"):
             media.image(self.path, Fraction(26, 25))
         result, hit = self.analysis(asset=replace(self.asset, duration_frames=27), media=media)
         self.assertFalse(hit)
         self.assertEqual(result[0]["duration_frames"], 25)
+        proxy = media.video(self.path, result[0], self.rate)
+        self.assertEqual(proxy["video_metadata"], {"fps": 4})
+        probe = subprocess.run(
+            [shutil.which("ffprobe"), "-v", "error", "-show_streams", "-of", "json", "pipe:0"],
+            input=base64.b64decode(proxy["inline_data"]["data"]),
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual([s["codec_type"] for s in json.loads(probe.stdout)["streams"]], ["video"])
 
     def test_short_sources_produce_a_feasible_plan_without_repetition(self):
         evidence = {
@@ -171,7 +188,16 @@ class PlanningTests(unittest.TestCase):
         proposal = proposal_from_plan(
             self.snapshot,
             "request",
-            {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 50}]},
+            {
+                "shots": [
+                    {
+                        "bin_id": "1",
+                        "window_id": 0,
+                        "duration_frames": 50,
+                        "reason": "A visible detail connects the scene",
+                    }
+                ]
+            },
             evidence,
             self.brief,
         )
@@ -185,7 +211,16 @@ class PlanningTests(unittest.TestCase):
             proposal_from_plan(
                 replace(self.snapshot, assets=(asset,)),
                 "r",
-                {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 12}]},
+                {
+                    "shots": [
+                        {
+                            "bin_id": "1",
+                            "window_id": 0,
+                            "duration_frames": 12,
+                            "reason": "A visible detail connects the scene",
+                        }
+                    ]
+                },
                 evidence,
                 self.brief,
             )
@@ -193,7 +228,16 @@ class PlanningTests(unittest.TestCase):
     def test_planner_receives_feasible_target_instead_of_only_a_duration_cap(self):
         self.provider.generate.side_effect = [
             self.observation,
-            {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 50}]},
+            {
+                "shots": [
+                    {
+                        "bin_id": "1",
+                        "window_id": 0,
+                        "duration_frames": 50,
+                        "reason": "A visible detail connects the scene",
+                    }
+                ]
+            },
         ]
         plan_media(
             self.snapshot,
@@ -217,7 +261,12 @@ class PlanningTests(unittest.TestCase):
                 }
             ]
         }
-        shot = {"bin_id": "1", "window_id": 0, "duration_frames": 50}
+        shot = {
+            "bin_id": "1",
+            "window_id": 0,
+            "duration_frames": 50,
+            "reason": "A visible detail connects the scene",
+        }
         invalid = [
             [shot, shot],
             [dict(shot, bin_id="invented")],
@@ -243,7 +292,16 @@ class PlanningTests(unittest.TestCase):
             )
 
     def test_analysis_progress_and_cache_hits_are_reported_on_repeated_runs(self):
-        shots = {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 50}]}
+        shots = {
+            "shots": [
+                {
+                    "bin_id": "1",
+                    "window_id": 0,
+                    "duration_frames": 50,
+                    "reason": "A visible detail connects the scene",
+                }
+            ]
+        }
         events = []
         self.provider.generate.side_effect = [self.observation, shots, shots]
         for _ in range(2):
@@ -266,7 +324,16 @@ class PlanningTests(unittest.TestCase):
         snapshot = replace(self.snapshot, assets=(self.asset, replace(self.asset, bin_id="2")))
         self.provider.generate.side_effect = [
             self.observation,
-            {"shots": [{"bin_id": "1", "window_id": 0, "duration_frames": 50}]},
+            {
+                "shots": [
+                    {
+                        "bin_id": "1",
+                        "window_id": 0,
+                        "duration_frames": 50,
+                        "reason": "A visible detail connects the scene",
+                    }
+                ]
+            },
         ]
         proposal = plan_media(
             snapshot,
@@ -288,13 +355,23 @@ class PlanningTests(unittest.TestCase):
         barrier = threading.Barrier(2, timeout=3)
 
         def generate(parts):
-            if parts[0]["text"].startswith("Analyze"):
+            if any(p.get("text", "").startswith("Analyze") for p in parts):
                 barrier.wait()
                 return self.observation
             return {
                 "shots": [
-                    {"bin_id": "1", "window_id": 0, "duration_frames": 50},
-                    {"bin_id": "2", "window_id": 0, "duration_frames": 50},
+                    {
+                        "bin_id": "1",
+                        "window_id": 0,
+                        "duration_frames": 50,
+                        "reason": "A visible detail connects the scene",
+                    },
+                    {
+                        "bin_id": "2",
+                        "window_id": 0,
+                        "duration_frames": 50,
+                        "reason": "A visible detail connects the scene",
+                    },
                 ]
             }
 
@@ -375,6 +452,115 @@ class PlanningTests(unittest.TestCase):
                 Gemini(key, model)
         with self.assertRaises(AssistantError):
             brief_from_wire(dict(self.brief, duration_seconds=True))
+
+    def test_temporal_trims_exclude_unusable_leading_and_trailing_frames(self):
+        window = {
+            **candidates(self.asset, self.rate)[0],
+            **self.observation["windows"][0],
+            "trim_in": 5,
+            "trim_out": 45,
+        }
+        shot = {
+            "bin_id": "1",
+            "window_id": 0,
+            "duration_frames": 40,
+            "reason": "The camera has settled on the visible detail",
+        }
+        proposal = proposal_from_plan(
+            self.snapshot, "r", {"shots": [shot]}, {"1": [window]}, self.brief
+        )
+        self.assertEqual(proposal.operations[0].in_frame, 5)
+        self.assertEqual(proposal.operations[0].duration_frames, 40)
+        with self.assertRaisesRegex(AssistantError, "invalid_plan"):
+            proposal_from_plan(
+                self.snapshot,
+                "r",
+                {"shots": [dict(shot, duration_frames=41)]},
+                {"1": [window]},
+                self.brief,
+            )
+
+    def test_trim_offsets_cannot_escape_the_analyzed_window(self):
+        original = self.observation["windows"][0]
+        for changes in (
+            {"trim_in": -1},
+            {"trim_in": True},
+            {"trim_out": 51},
+            {"trim_out": 0},
+            {"trim_out": 49.5},
+            {"trim_in": 50},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(AssistantError):
+                validate_analysis(
+                    {"windows": [{**original, **changes}]}, candidates(self.asset, self.rate)
+                )
+
+    def test_micro_clips_skip_provider_work_and_cannot_generate_an_edit(self):
+        snapshot = replace(self.snapshot, assets=(replace(self.asset, duration_frames=12),))
+        with self.assertRaisesRegex(AssistantError, "insufficient_footage"):
+            plan_media(
+                snapshot,
+                "r",
+                {"1": str(self.path)},
+                self.brief,
+                self.root / "cache",
+                self.provider,
+                self.media,
+                lambda *_: None,
+            )
+        self.provider.generate.assert_not_called()
+        self.media.video.assert_not_called()
+
+    def test_review_reports_usable_duration_and_excluded_sources_without_paths(self):
+        snapshot = replace(
+            self.snapshot, assets=(self.asset, replace(self.asset, bin_id="2", duration_frames=12))
+        )
+        self.provider.generate.side_effect = [
+            self.observation,
+            {
+                "shots": [
+                    {
+                        "bin_id": "1",
+                        "window_id": 0,
+                        "duration_frames": 50,
+                        "reason": "A visible detail opens the story",
+                    }
+                ]
+            },
+        ]
+        reviews = []
+        proposal = plan_media(
+            snapshot,
+            "r",
+            {"1": str(self.path), "2": str(self.path)},
+            self.brief,
+            self.root / "cache",
+            self.provider,
+            self.media,
+            lambda *_: None,
+            reviews.append,
+        )
+        review = reviews[0]
+        self.assertEqual(review["available_frames"], 50)
+        self.assertEqual(review["skipped_assets"], 1)
+        self.assertEqual(review["shots"][0]["instance_id"], proposal.operations[0].instance_id)
+        self.assertNotIn(str(self.path), json.dumps(review))
+
+    def test_unwatchable_ranges_and_empty_rationales_are_rejected(self):
+        window = {**candidates(self.asset, self.rate)[0], **self.observation["windows"][0]}
+        shot = {"bin_id": "1", "window_id": 0, "duration_frames": 50, "reason": "Visible detail"}
+        for quality, reason in ((49, "Visible detail"), (80, "  "), (80, "x" * 301)):
+            with (
+                self.subTest(quality=quality, reason=reason),
+                self.assertRaisesRegex(AssistantError, "invalid_plan"),
+            ):
+                proposal_from_plan(
+                    self.snapshot,
+                    "r",
+                    {"shots": [dict(shot, reason=reason)]},
+                    {"1": [dict(window, quality=quality)]},
+                    self.brief,
+                )
 
     def test_rest_key_is_in_header_and_errors_do_not_reflect_the_key(self):
         provider = Gemini("private-key")

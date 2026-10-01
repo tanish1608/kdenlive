@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Montaz contributors
-"""One deterministic diagnostic request per process; no provider calls."""
+"""One bounded planning request per process; stdout is protocol only."""
 
 import os
 import signal
@@ -99,8 +99,10 @@ def main() -> int:
             cache = Path(
                 os.environ.get("MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis")
             )
+            reviews = []
             proposal = plan_media(
-                snapshot, request_id, request["sources"], brief, cache, provider, media, progress
+                snapshot, request_id, request["sources"], brief, cache, provider, media, progress,
+                reviews.append,
             )
         else:
             proposal = propose_demo(snapshot, request_id)
@@ -108,7 +110,10 @@ def main() -> int:
         send_event(run.events[-1])
         run.finish()
         send_event(run.events[-1])
-        output.write(encode({"version": 1, "type": "proposal", "proposal": to_wire(proposal)}))
+        message = {"version": 1, "type": "proposal", "proposal": to_wire(proposal)}
+        if real:
+            message["review"] = reviews[0]
+        output.write(encode(message))
         output.flush()
         return 0
     except (

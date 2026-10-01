@@ -17,6 +17,7 @@ public:
     bool start(const QJsonObject &snapshot, const QJsonObject &context = {});
     void stop();
     bool busy() const { return m_busy; }
+    QJsonObject editorialReview() const { return m_review; }
     void recordApply(const QString &requestId, const QString &resultCode);
 
 Q_SIGNALS:
@@ -39,6 +40,7 @@ private:
     QByteArray m_buffer;
     QJsonObject m_snapshot;
     QJsonObject m_proposal;
+    QJsonObject m_review;
     QString m_requestId;
     QString m_failure;
     QString m_logPath;

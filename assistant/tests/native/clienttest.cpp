@@ -71,6 +71,29 @@ private Q_SLOTS:
         QVERIFY(Montaz::validateProposal(snapshot(), proposal()).isEmpty());
         QCOMPARE(Montaz::validateProposal(snapshot(), proposal(), {QStringLiteral("request")}), QStringLiteral("already_applied"));
     }
+    void editorialReviewCannotInventShotsOrMisstateDuration()
+    {
+        const QJsonObject shot{{"instance_id", "request:0"}, {"role", "detail"}, {"quality", 80}, {"reason", "Visible detail introduces the place"}};
+        const QJsonObject review{{"requested_frames", 1800}, {"available_frames", 120}, {"skipped_assets", 2}, {"shots", QJsonArray{shot}}};
+        QVERIFY(Montaz::validateEditorialReview(snapshot(), proposal(), review).isEmpty());
+        for (const auto &key : {QStringLiteral("requested_frames"), QStringLiteral("available_frames")}) {
+            auto invalid = review;
+            invalid[key] = 59;
+            QVERIFY(!Montaz::validateEditorialReview(snapshot(), proposal(), invalid).isEmpty());
+        }
+        for (const auto &change : {QJsonObject{{"instance_id", "invented"}}, QJsonObject{{"role", "speech"}}, QJsonObject{{"quality", true}},
+                                   QJsonObject{{"quality", 49}}, QJsonObject{{"reason", " "}}, QJsonObject{{"reason", QString(301, 'x')}}}) {
+            auto invalid = review;
+            auto invalidShot = shot;
+            for (auto it = change.begin(); it != change.end(); ++it)
+                invalidShot[it.key()] = it.value();
+            invalid["shots"] = QJsonArray{invalidShot};
+            QVERIFY(!Montaz::validateEditorialReview(snapshot(), proposal(), invalid).isEmpty());
+        }
+        auto invalid = review;
+        invalid["skipped_assets"] = 6;
+        QVERIFY(!Montaz::validateEditorialReview(snapshot(), proposal(), invalid).isEmpty());
+    }
     void batchFailureRollsBackAndNeverCommits()
     {
         int inserted = 0, committed = 0;
@@ -247,6 +270,45 @@ private Q_SLOTS:
         QVERIFY(client.start(snapshot()));
         QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 5000);
         QVERIFY(ready[0][0].toJsonObject()["request_id"] != ready[1][0].toJsonObject()["request_id"]);
+    }
+    void editorialMetadataRequiresMatchingShotsAndCleanExit()
+    {
+        const QByteArray script = R"PY(import json,sys
+r=json.loads(sys.stdin.readline())
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n,status in enumerate(('running','running','completed','completed'),1):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n in (1,4) else 'planner','status':status,'reason':''})
+s=r['snapshot']
+p={'request_id':r['request_id'],'project_id':s['project_id'],'sequence_id':s['sequence_id'],
+   'base_revision':s['revision'],'frame_rate':s['frame_rate'],'protocol_version':1,
+   'operations':[{'instance_id':'one','bin_id':'1','track_id':'1','start_frame':0,'in_frame':0,'duration_frames':60}]}
+review={'requested_frames':1800,'available_frames':120,'skipped_assets':2,
+        'shots':[{'instance_id':'one','role':'detail','quality':80,'reason':'private editorial text'}]}
+FAULT
+send({'type':'proposal','proposal':p,'review':review})
+EXIT
+)PY";
+        for (int fault = 0; fault < 3; ++fault) {
+            auto worker = script;
+            worker.replace("FAULT", fault == 1 ? "review['shots'][0]['instance_id']='invented'" : "pass");
+            worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::proposalReady), failures(&client, &Montaz::WorkerClient::failed);
+            QVERIFY(client.start(snapshot()));
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
+            QCOMPARE(failures.count(), fault == 0 ? 0 : 1);
+            QCOMPARE(client.editorialReview().isEmpty(), fault != 0);
+            const auto logs = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+            for (const auto &name : QDir(logs).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+                QFile file(logs + name);
+                QVERIFY(file.open(QIODevice::ReadOnly));
+                QVERIFY(!file.readAll().contains("private editorial text"));
+            }
+        }
     }
     void missingGeminiKeyIsExplicitAndSourcePathsAreNotLogged()
     {

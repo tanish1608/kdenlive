@@ -131,3 +131,32 @@ selection keeps the timeline monitor active. Native build/`assistanttest` and
 desktop open/close, source selection and saved-project restoration passed.
 Preset workspace switching remains a separate manual check (the local Load
 Layout submenu was empty). Packaging and releases remain deferred.
+
+## Temporal evidence and native export — October 1, 2026
+
+Analysis version `video-windows-4` replaces two-still sampling with bounded silent
+video windows sampled at four FPS. It records validated usable offsets, skips
+sub-second sources, and adds per-shot editorial reasons plus duration feasibility.
+A live retry preserved successful partial analysis after a provider response
+failure; that initial failure remains undiagnosed. The native repeat reused 12
+analyses and skipped 3 micro-clips, with no further footage analysis calls.
+
+A 7-shot native draft exported 474 frames (15.8158 s) at 30000/1001 FPS. Its six
+cut boundaries, one Undo/Redo, saved-project reopening, and first-cut seeking were
+checked. The test project is `montaz-review/goa-temporal-review.kdenlive` beside
+the supplied clips; the exported review is `~/Movies/goa-temporal-review.mp4`.
+They stay outside Git. Different briefs produced different lengths; these runs
+are integration evidence, not a controlled quality benchmark.
+
+Development runtime presets/render helper were absent from the app bundle; the
+launcher now stages them. Native conversion also failed on phone auxiliary audio
+with an unknown codec. Conversion now maps recognized streams and rejects
+nonzero process exits. Synthetic native regressions cover unsupported audio,
+multiple valid tracks, silence and partial failed output. Real phone conversion
+and native render completed. SDK/macOS accessibility inspection after closing a
+dialog still crashes; the saved project reopened successfully.
+
+The output is a visual prototype: substantial pillarboxing and no sound are its
+largest remaining quality gaps. Continue with explicit orientation/native framing,
+then ElevenLabs music and measured audio timing. Narration/captions and bounded
+revision follow; publication and packaging remain deferred.

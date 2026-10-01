@@ -29,8 +29,9 @@ edit proposals; messages never directly execute code or modify project files.
 The native build and `assistanttest` pass. The desktop checks restored the old
 tabbed assistant to the right, reclaimed editing space on close, kept source
 selection from reopening the Clip Monitor, and moved Library alongside the bin.
-Preset workspace switching still needs a manual check when presets are available
-in this development environment; the Load Layout submenu was empty here.
+The launcher now stages upstream runtime resources into the development bundle.
+Logging/Editing/Audio/Effects/Color presets are available; switching to Editing
+keeps the assistant on the right and the source monitor hidden.
 
 Conversations are bounded and session-only. Secrets, prompts and source filenames
 stay out of run logs. A pending review is visibly distinct from background work;
@@ -69,9 +70,10 @@ including portrait/landscape, variable frame rates and sub-second shots. A
 
 ## Next implementation gates, in order
 
-1. **Editorial quality:** improve temporal evidence and opening/detail/ending
-   selection; skip unsuitable micro-clips, expose duration feasibility and shot
-   rationale. Review the Goa edit before claiming quality improvements.
+1. **Editorial quality — first iteration verified:** sampled video windows,
+   validated usable trims, micro-clip exclusion, feasible-duration estimates and
+   shot explanations. Native Goa planning/apply/undo/save/reopen/export was checked;
+   [quality review](quality-review.md) records findings and limitations.
 2. **Framing:** explicit project orientation and native framing proposals for mixed
    portrait/landscape. Preserve manual reframing and test exact undo/redo.
 3. **Sound:** ElevenLabs music and occasional effects, measured beat/phrase timing,
@@ -81,6 +83,11 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    switching without subtitle duplication or timing drift.
 5. **Quality review:** one bounded revision, honest unavailable/failed states,
    mixed-media regressions and exported output review. Publication comes later.
+
+Native phone conversion also needed a fix: preserve recognized audio streams,
+exclude unsupported auxiliary audio, and reject nonzero encoder exits even when
+a partial file exists. Synthetic native conversion regressions and the supplied
+phone clips exercise it. The original footage and earlier project remain preserved.
 
 Each gate needs focused regressions plus an actual editor/output check. Provider
 success and passing unit tests alone do not establish editorial quality.

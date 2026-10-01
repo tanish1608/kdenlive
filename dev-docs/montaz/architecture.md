@@ -80,16 +80,20 @@ allowlist, framing, text style, music arc, and fallback rules. Begin with travel
 postcard, adventure montage, and travel diary. Do not fabricate missing footage
 or repeat shots merely to reach a requested duration.
 
-The first visual planner implements three pacing presets, two-video analysis
-concurrency and a content-addressed observations cache. It samples two frames in
-each first/middle/last six-second window. Model observations are explicitly
-limited to those samples; full temporal analysis, speech, music/beat alignment,
-framing, transitions and subtitle style operations are not implemented yet.
-The worker probes video stream length before sampling: audio/container tails must
-not become selectable visual footage. Samples use each window's start and an
-interior late frame (90%). Cache sampling version is `visual-windows-3`. Travel
-plans reject sub-second cuts and receive a duration target from usable unique
-windows. This is guidance, not a guarantee that the model fills every usable shot.
+The visual planner implements three pacing presets, two-video analysis concurrency
+and a content-addressed observations cache. It supplies bounded silent proxies
+for each first/middle/last six-second window, sampled at four FPS by Gemini.
+Analysis version `video-windows-4` includes suggested usable trim offsets; local
+checks bound them to visible source frames. Sub-second sources are skipped and
+low-quality windows excluded. Plans use distinct usable ranges, opening/detail/
+activity/ending guidance, and per-shot reasons. Sampled analysis cannot guarantee
+frame-perfect motion or good storytelling. Speech, music/beat alignment, framing,
+transitions and subtitle style operations remain pending.
+
+Optional editorial review metadata accompanies the existing insertion contract;
+native validation binds its shot identities and durations to the proposal. The UI
+shows reasons, usable duration and excluded sources; run logs keep only numeric
+metrics. It has no authority to change the edit contract.
 
 ## Runs and cancellation
 
@@ -113,7 +117,7 @@ The diagnostic implementation records timestamps, run/stage outcomes, revision,
 asset count, and apply result in the application's cache at `montaz/runs/*.jsonl`.
 It does not record bin paths, source text, environment variables, worker stderr,
 or free-form event reasons. Provider/model/cache progress is now recorded; log
-retention and editorial quality metrics remain pending.
+retention and measured editorial quality evaluation remain pending.
 
 ## Native integration locations
 

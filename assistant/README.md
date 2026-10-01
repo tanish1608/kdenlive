@@ -31,9 +31,11 @@ shots at exact project frames. It uses no providers, sound, transitions, or capt
 The native dock sends a `plan_media` request with editor-issued asset IDs, local
 source paths, a brief, requested duration, and one of three travel pacing presets.
 `planning.py` samples the first/middle/last six-second windows (or a shorter source),
-with two frames per window. Gemini describes only these observations, then chooses
-source windows and cut lengths. This is sampled visual analysis, not complete video
-understanding or speech transcription. The current edit inserts video only.
+as bounded silent video proxies sampled by Gemini at four frames per second.
+It describes visible activity and suggests usable start/end offsets, then plans
+an opening, varied middle and ending with a reason for each shot. These are
+sampled observations and model-estimated trims, not frame-perfect detection or
+speech transcription. The current edit inserts video only.
 
 The native **AI** button opens a chat dock using Kdenlive's actions and palette.
 Enter sends; Shift+Enter adds a line. Follow-up messages refine the active brief,
@@ -53,24 +55,30 @@ duration, and rational FPS. A renamed or re-imported source reuses its evidence.
 Two videos are analyzed concurrently; identical content shares one analysis even
 when imported twice. Cache writes are atomic and owner-only. Failed analysis is
 never a valid cache entry. The brief and recipe do not invalidate visual evidence.
-Sampling v3 probes the video stream duration separately from audio/container
-duration, bounds candidate windows to visible video, and places the second sample
-90% inside each window. This avoids empty tail samples from short phone clips.
+Analysis version `video-windows-4` probes visible stream length separately from
+audio/container duration. Silent proxies are limited to six seconds, 512 pixels,
+12 encoded frames/second and 4 MiB per window. Source clips below one second are
+skipped before provider analysis; they cannot become watchable travel cuts.
+Earlier still-frame caches intentionally do not satisfy this new analysis version.
 
 Plans reject duplicate content, unknown windows, poor-quality observations,
 source overflow, unreasonable cut durations, and excess requested duration.
 Shorter edits are explicitly reported; footage is never stretched or repeated to
 fill a brief. Missing keys and provider/parse failures stop the run before Apply.
 Travel cuts below one second are rejected. The planner gets a feasible target
-from distinct usable windows, rather than only a maximum requested duration.
-There is no permissive critic fallback or caption job on silent footage.
+from distinct usable trimmed windows, rather than only a maximum requested
+duration. The preview shows each shot's purpose/reason, a usable-duration estimate
+and excluded-source count. This optional review metadata is independently checked
+against the proposal before Apply; it cannot alter editor operations. Quality
+scores are model judgments, not measured output quality. There is no permissive
+critic fallback or caption job on silent footage.
 
 Stop kills owned FFmpeg children and terminates the worker with a 750 ms grace
 period. Media extraction has a 15-second deadline, requests 35 seconds, and the
 native run three minutes. Completed cache entries survive Stop and later failures.
 The **Run logs** button opens redacted timestamps, model, progress/cache counts,
-terminal status, and apply acknowledgments; footage paths/descriptions/briefs and
-provider stderr are excluded.
+terminal status, duration/shot/mean-score metrics and apply acknowledgments;
+footage paths/descriptions/briefs/shot reasons and provider stderr are excluded.
 
 Gemini uses the official [GenerateContent REST API](https://ai.google.dev/api/generate-content)
 with JSON output, followed by strict local/native validation. Narration, source

@@ -57,6 +57,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     const auto logDirectory = cache + QStringLiteral("/montaz/runs");
     m_logPath = !cache.isEmpty() && QDir().mkpath(logDirectory) ? logDirectory + QLatin1Char('/') + m_requestId + QStringLiteral(".jsonl") : QString();
     m_proposal = {};
+    m_review = {};
     m_buffer.clear();
     m_sequence = 0;
     m_outputBytes = 0;
@@ -103,6 +104,7 @@ void Montaz::WorkerClient::stop()
     if (!m_busy || m_cancelled) return;
     m_cancelled = true;
     m_proposal = {};
+    m_review = {};
     m_deadline.stop();
     m_process.terminate();
     m_killTimer.start();
@@ -113,6 +115,7 @@ void Montaz::WorkerClient::abort(const QString &code)
     if (!m_busy || m_cancelled || !m_failure.isEmpty()) return;
     m_failure = code;
     m_proposal = {};
+    m_review = {};
     m_deadline.stop();
     m_process.terminate();
     m_killTimer.start();
@@ -196,24 +199,53 @@ void Montaz::WorkerClient::readOutput()
             Q_EMIT eventReceived(message);
         } else if (type == QStringLiteral("error") && m_ready && !m_completed && message.size() == 3) {
             const auto code = message.value(QStringLiteral("code")).toString();
-            const QStringList allowed{QStringLiteral("missing_api_key"),        QStringLiteral("invalid_settings"),
-                                      QStringLiteral("invalid_brief"),          QStringLiteral("provider_auth"),
-                                      QStringLiteral("provider_unavailable"),   QStringLiteral("provider_timeout"),
-                                      QStringLiteral("invalid_model_response"), QStringLiteral("invalid_analysis"),
-                                      QStringLiteral("invalid_plan"),           QStringLiteral("invalid_sources"),
-                                      QStringLiteral("no_video_track"),         QStringLiteral("media_changed"),
-                                      QStringLiteral("media_unreadable"),       QStringLiteral("media_timeout"),
-                                      QStringLiteral("invalid_request"),        QStringLiteral("cancelled")};
+            const QStringList allowed{QStringLiteral("missing_api_key"),
+                                      QStringLiteral("invalid_settings"),
+                                      QStringLiteral("invalid_brief"),
+                                      QStringLiteral("provider_auth"),
+                                      QStringLiteral("provider_unavailable"),
+                                      QStringLiteral("provider_timeout"),
+                                      QStringLiteral("invalid_model_response"),
+                                      QStringLiteral("invalid_analysis"),
+                                      QStringLiteral("invalid_plan"),
+                                      QStringLiteral("invalid_sources"),
+                                      QStringLiteral("no_video_track"),
+                                      QStringLiteral("media_changed"),
+                                      QStringLiteral("insufficient_footage"),
+                                      QStringLiteral("media_unreadable"),
+                                      QStringLiteral("media_timeout"),
+                                      QStringLiteral("invalid_request"),
+                                      QStringLiteral("cancelled")};
             abort(allowed.contains(code) ? code : QStringLiteral("worker_rejected_request"));
             return;
-        } else if (type == QStringLiteral("proposal") && m_ready && m_completed && m_proposal.isEmpty() && message.size() == 3 &&
-                   message.value(QStringLiteral("proposal")).isObject()) {
+        } else if (type == QStringLiteral("proposal") && m_ready && m_completed && m_proposal.isEmpty() &&
+                   message.size() == (message.contains(QStringLiteral("review")) ? 4 : 3) && message.value(QStringLiteral("proposal")).isObject()) {
             const auto proposal = message.value(QStringLiteral("proposal")).toObject();
             if (proposal.value(QStringLiteral("request_id")) != m_requestId || !validateProposal(m_snapshot, proposal).isEmpty()) {
                 abort(QStringLiteral("invalid_proposal"));
                 return;
             }
             m_proposal = proposal;
+            if (message.contains(QStringLiteral("review"))) {
+                if (!message.value(QStringLiteral("review")).isObject() ||
+                    !validateEditorialReview(m_snapshot, proposal, message.value(QStringLiteral("review")).toObject()).isEmpty()) {
+                    abort(QStringLiteral("invalid_editorial_review"));
+                    return;
+                }
+                m_review = message.value(QStringLiteral("review")).toObject();
+                int frames = 0, quality = 0;
+                for (const auto value : proposal.value(QStringLiteral("operations")).toArray())
+                    frames += value.toObject().value(QStringLiteral("duration_frames")).toInt();
+                for (const auto value : m_review.value(QStringLiteral("shots")).toArray())
+                    quality += value.toObject().value(QStringLiteral("quality")).toInt();
+                record(QStringLiteral("editorial_review"),
+                       {{QStringLiteral("shots"), proposal.value(QStringLiteral("operations")).toArray().size()},
+                        {QStringLiteral("planned_frames"), frames},
+                        {QStringLiteral("requested_frames"), m_review.value(QStringLiteral("requested_frames"))},
+                        {QStringLiteral("available_frames"), m_review.value(QStringLiteral("available_frames"))},
+                        {QStringLiteral("skipped_assets"), m_review.value(QStringLiteral("skipped_assets"))},
+                        {QStringLiteral("mean_model_quality"), quality / m_review.value(QStringLiteral("shots")).toArray().size()}});
+            }
         } else {
             abort(type == QStringLiteral("error") ? QStringLiteral("worker_rejected_request") : QStringLiteral("invalid_worker_message"));
             return;
@@ -235,6 +267,7 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
         failure = QStringLiteral("worker_incomplete");
     m_busy = false;
     m_proposal = {};
+    if (cancelled || !failure.isEmpty()) m_review = {};
     m_buffer.clear();
     record(cancelled            ? QStringLiteral("cancelled")
            : !failure.isEmpty() ? QStringLiteral("failed")

@@ -33,6 +33,7 @@ private:
     EditorAdapter *m_adapter;
     WorkerClient *m_worker;
     QLabel *m_status;
+    QLabel *m_shotReason;
     QListWidget *m_preview;
     QPushButton *m_plan;
     QPushButton *m_stop;

@@ -146,8 +146,8 @@ Inspect the list before **Apply edit**. Gemini uses a private settings file or
 The current planner creates video-only cuts; narration, sound and captions follow
 in later milestones. Set `MONTAZ_ASSISTANT_DEMO=1` for the offline diagnostic.
 Verify one Undo removes the whole edit and Redo restores it. Full playback,
-save/reopen and seeking were exercised locally. Export and additional native
-failure checks remain required; see
+save/reopen, seeking and a native Goa export were exercised locally. Additional
+native failure checks remain required; see
 [native integration](native-integration.md).
 
 ## 8. Reopen the development environment later
