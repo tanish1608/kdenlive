@@ -3,11 +3,15 @@
 # SPDX-FileCopyrightText: 2026 Montaz contributors
 set -eo pipefail
 
+montaz_source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 montaz_craft_root="${MONTAZ_CRAFT_ROOT:-${KDEROOT:-$HOME/CraftRoot}}"
 export CRAFT_PYTHON_BIN="${CRAFT_PYTHON_BIN:-${KDENLIVE_ASSISTANT_PYTHON:-$(command -v python3)}}"
 source "$montaz_craft_root/craft/craftenv.sh"
 cb kdenlive
 set -u
+
+"$CRAFT_PYTHON_BIN" "$montaz_source_root/assistant/tools/prepare_craft_macos.py" "$PWD/bin/kdenlive.app"
 
 # These are development SDK paths, not the eventual packaged app layout.
 export DYLD_FALLBACK_LIBRARY_PATH="$montaz_craft_root/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"

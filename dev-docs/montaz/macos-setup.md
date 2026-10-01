@@ -126,7 +126,12 @@ ctest -R '^assistanttest$' --output-on-failure
 `cb` changes into Craft's Kdenlive build directory. The launcher activates Craft
 and runs `bin/kdenlive.app/Contents/MacOS/kdenlive` with the development SDK's
 library, MLT plugin/profile, and Frei0r paths. It retains the Python setting.
-The standalone dependency-free Python tests can also be run from the source tree:
+Before launch it stages upstream effects, workspace layouts, conversion/render
+presets and the built render helper into the development app bundle. This is
+required because a build alone does not install runtime resources on macOS; it
+does not install an SDK or change user settings. If the helper is missing, build
+`kdenlive_render` alongside `kdenlive`. The standalone dependency-free Python
+tests can also be run from the source tree:
 
 ```sh
 cd "$MONTAZ_REPO"
@@ -162,6 +167,7 @@ executable from step 7. After source changes, repeat the build command in step 6
 | Compiler/SDK or Xcode license error | Open Xcode once and complete its setup prompts. |
 | `No tests were found` | Craft activation changes directories. Run `cb kdenlive` before CTest and check both build options were ON. |
 | `libvpx.12.dylib` not loaded | Rebuild after the test configuration fix; use the launcher for the editor. The library is installed but its bare install name needs Craft's library search path. |
+| Empty Load Layout, conversion or render presets | Launch with the helper; it stages source runtime data into `Contents/Resources`. |
 | Missing MLT modules | Use the launcher. The SDK keeps modules in `plugins/mlt`; an unpackaged app cannot find them through bundle discovery. |
 | Assistant panel missing | Confirm the local source path and `BUILD_MONTAZ_ASSISTANT=ON` build option. |
 | Assistant worker cannot start | Check the explicit Python path exists and reports Python 3.11+. |
