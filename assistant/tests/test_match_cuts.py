@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Montaz contributors
+import base64
 import copy
 import json
+import os
+import sys
 import tempfile
 import unittest
 from dataclasses import replace
@@ -11,6 +14,7 @@ from unittest.mock import Mock, patch
 from montaz_assistant.contracts import Asset, FrameRate, OccupiedRange, Snapshot, Track
 from montaz_assistant.gemini import AssistantError
 from montaz_assistant.match_cuts import (
+    native_frames,
     UNSUITABLE,
     align,
     box,
@@ -21,7 +25,10 @@ from montaz_assistant.match_cuts import (
     rank,
     window,
 )
-from montaz_assistant.planning import MediaTools
+from montaz_assistant.planning import MediaChildError, MediaTools
+
+
+JPEG = base64.b64encode(b"\xff\xd8synthetic-fixture\xff\xd9").decode("ascii")
 
 
 class MatchCutsTests(unittest.TestCase):
@@ -182,7 +189,7 @@ class MatchCutsTests(unittest.TestCase):
             def native(*args):
                 seed = args[6] if len(args) > 6 else None
                 return dict(
-                    first="jpeg", last="jpeg", boxes=[seed] * args[2] if seed else []
+                    first=JPEG, last=JPEG, boxes=[seed] * args[2] if seed else []
                 )
 
             with patch(
@@ -233,7 +240,7 @@ class MatchCutsTests(unittest.TestCase):
             )
             with patch(
                 "montaz_assistant.match_cuts.native_frames",
-                return_value=dict(first="jpeg", last="jpeg", boxes=[]),
+                return_value=dict(first=JPEG, last=JPEG, boxes=[]),
             ):
                 review = propose_match(
                     self.snapshot,
@@ -329,7 +336,7 @@ class MatchCandidateTests(unittest.TestCase):
 
     def native(self, path, start, length, spec, rate, media, seed=None):
         if seed is None:
-            return dict(first="jpeg", last="jpeg", boxes=[])
+            return dict(first=JPEG, last=JPEG, boxes=[])
         self.seeds.append(seed)
         action = self.behavior.get(tuple(seed))
         if callable(action):
@@ -383,9 +390,10 @@ class MatchCandidateTests(unittest.TestCase):
             dict(reason="r", candidates=[dict(boxes=list(CENTERED))]),
             dict(reason="r", candidates=[{**good["candidates"][0], "score": 0.9}]),
         ]
-        for value in (True, float("nan"), float("inf"), "0.4", None):
+        for value in (True, float("nan"), float("inf"), 10**400, "0.4", None):
             bad.append(answer(([value, 0.4, 0.1, 0.1], CENTERED[1])))
         bad.append(answer(([0.95, 0.4, 0.1, 0.1], CENTERED[1])))
+        bad.append(answer(([0.9000001, 0.4, 0.1, 0.1], CENTERED[1])))
         for raw in bad:
             with self.subTest(raw=raw), self.assertRaises(AssistantError) as caught:
                 parse_candidates(raw)
@@ -396,6 +404,7 @@ class MatchCandidateTests(unittest.TestCase):
             dict(reason="Old schema", boxes=list(CENTERED)),
             answer(([True, 0.4, 0.1, 0.1], CENTERED[1])),
             answer(([float("nan"), 0.4, 0.1, 0.1], CENTERED[1])),
+            answer(([10**400, 0.4, 0.1, 0.1], CENTERED[1])),
             answer(CENTERED, OFFSET, HIGH, SHAPES),
         ):
             self.provider.generate.return_value = raw
@@ -648,3 +657,83 @@ class MatchCandidateTests(unittest.TestCase):
                 self.assertFalse(self.run_match()["cached"])
         self.assertEqual(self.provider.generate.call_count, 6)
         self.assertTrue(self.run_match()["cached"])
+
+    def test_invalid_cached_jpegs_and_overflow_coordinates_are_rebuilt(self):
+        self.provider.generate.return_value = answer(CENTERED)
+        self.run_match()
+        (entry,) = self.cache.glob("*.json")
+        evidence = json.loads(entry.read_text())
+        corruptions = []
+        for preview in (
+            "not-base64!",
+            base64.b64encode(b"not a JPEG").decode(),
+            JPEG + "=",
+            "",
+        ):
+            corrupt = copy.deepcopy(evidence)
+            corrupt["preview"]["outgoing"] = preview
+            corruptions.append(corrupt)
+        corrupt = copy.deepcopy(evidence)
+        corrupt["tracked"][0][0][0][0] = 10**400
+        corruptions.append(corrupt)
+        for corrupt in corruptions:
+            entry.write_text(json.dumps(corrupt))
+            self.assertFalse(self.run_match()["cached"])
+        self.assertEqual(self.provider.generate.call_count, 6)
+        self.assertTrue(self.run_match()["cached"])
+
+    def test_child_exit_status_is_preserved_and_only_seed_rejection_is_retryable(self):
+        for code in (3, 5):
+            with self.assertRaises(MediaChildError) as caught:
+                MediaTools()._output(
+                    [sys.executable, "-c", f"raise SystemExit({code})"]
+                )
+            self.assertEqual(caught.exception.code, "media_unreadable")
+            self.assertEqual(caught.exception.returncode, code)
+        for code, seed in (
+            (2, CENTERED[0]),
+            (3, CENTERED[0]),
+            (4, CENTERED[0]),
+            (-11, CENTERED[0]),
+            (5, None),
+            (5, CENTERED[0]),
+        ):
+            media = MediaTools()
+            with (
+                patch.dict(os.environ, MONTAZ_TRACKER=sys.executable),
+                patch.object(media, "_output", side_effect=MediaChildError(code)),
+            ):
+                with self.assertRaises(AssistantError) as caught:
+                    native_frames(
+                        Path(self.paths["1"]),
+                        30,
+                        30,
+                        self.spec,
+                        self.snapshot.frame_rate,
+                        media,
+                        seed,
+                    )
+            self.assertEqual(
+                caught.exception.code,
+                "tracking_unavailable" if code == 5 and seed else "media_unreadable",
+            )
+
+    def test_terminal_helper_failures_do_not_launch_another_pair(self):
+        self.provider.generate.return_value = answer(CENTERED, OFFSET)
+        for error in (
+            MediaChildError(3),
+            MediaChildError(-11),
+            AssistantError("media_timeout"),
+            AssistantError("invalid_match_evidence"),
+        ):
+
+            def fail(media):
+                raise error
+
+            self.behavior[tuple(CENTERED[0])] = fail
+            self.seeds.clear()
+            with self.assertRaises(AssistantError) as caught:
+                self.run_match()
+            self.assertEqual(caught.exception.code, error.code)
+            self.assertEqual(self.seeds, [CENTERED[0]])
+            self.assert_uncached()

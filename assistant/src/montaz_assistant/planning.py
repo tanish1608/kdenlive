@@ -59,6 +59,14 @@ def brief_from_wire(raw: dict) -> dict:
     return value
 
 
+class MediaChildError(AssistantError):
+    """Retain a child's exit status locally; stdout/stderr never enter diagnostics."""
+
+    def __init__(self, returncode: int):
+        super().__init__("media_unreadable")
+        self.returncode = returncode
+
+
 class MediaTools:
     """Own every FFmpeg child so Stop can terminate media work as well as Python."""
 
@@ -209,7 +217,9 @@ class MediaTools:
         try:
             data, _ = child.communicate(timeout=15)
             self.check()
-            if child.returncode or len(data) > maximum_bytes:
+            if child.returncode:
+                raise MediaChildError(child.returncode)
+            if len(data) > maximum_bytes:
                 raise AssistantError("media_unreadable")
             return data
         except subprocess.TimeoutExpired as exc:

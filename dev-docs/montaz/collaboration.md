@@ -97,7 +97,7 @@ Python filenames above are under `assistant/src/montaz_assistant/`.
 Protocol changes require both Python and native validators/tests; do not add
 fields to an existing envelope assuming they will be ignored.
 
-The latest match cache version is `object-match-3`. It keys complete candidate
+The latest match cache version is `object-match-4`. It keys complete candidate
 evidence by source hashes, source windows, canvas, rational FPS, Gemini model and
 algorithm version. Empty or geometrically unsuitable candidate sets are cacheable;
 provider failures, runs where every tracked pair failed, and budget-truncated runs
@@ -145,6 +145,16 @@ already selected clips; do not search/reorder the whole project in this PR.
 
 Status (October 1, 2026): implemented by Claude on `codex/claude-match-cut-candidates`
 and **awaiting Codex review**; not yet merged or exercised in the desktop editor.
+
+Codex review corrections are isolated on `codex/review-match-cut-candidates`:
+reject enormous and slightly out-of-frame model coordinates before tracking;
+validate cached previews against native canonical base64/JPEG boundaries; retain
+media-child exit status so only explicit seeded subject rejection (status 5)
+permits trying another pair. Decoder/filter failures, crashes and timeouts stay
+terminal. This is a small internal `MediaChildError` addition to the shared media
+utility; the public error codes, native helper and final protocol-v3 envelope are
+unchanged. Cache version 4 prevents reusing version-3 evidence with ambiguous
+failed-track provenance. Added regression checks cover each correction.
 
 - [x] **M1 — Offer multiple credible seeds in one Gemini call.** Request at most
   three candidate object pairs from the same two native seed images. Define a

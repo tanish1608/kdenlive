@@ -292,7 +292,7 @@ first second, keeping the valid pair with the lowest crop/motion cost.
 Uniform native Transform crops align centers and apparent heights, capped at 2×,
 with shape, appearance, motion and canvas-coverage gates. Size smoothing prevents
 integer tracking-box jitter becoming breathing zoom. Video-stream tail checks
-avoid frozen audio-only tails. The separate `object-match-3` cache retains complete
+avoid frozen audio-only tails. The separate `object-match-4` cache retains complete
 candidate evidence by content, trim, FPS, canvas and model; source hashes are rechecked.
 
 The right dock has Match cut, a two-by-two original/aligned boundary comparison,

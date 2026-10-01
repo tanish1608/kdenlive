@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Montaz contributors
 """Bounded object-match proposals. Kdenlive/MLT owns decoding, tracking and effects."""
 
+import base64
 import hashlib
 import json
 import math
@@ -13,10 +14,10 @@ from typing import Callable
 
 from .contracts import FrameRate, Snapshot
 from .gemini import AssistantError, Gemini
-from .planning import MediaTools
+from .planning import MediaChildError, MediaTools
 from .protocol import decode, fields, frame
 
-VERSION = "object-match-3"
+VERSION = "object-match-4"
 MAX_CANDIDATES = 3
 MAX_TRACKED = 2
 # WorkerClient kills a match run 90 s after sending it. Keep 10 s for interpreter
@@ -107,7 +108,7 @@ def box(raw: object) -> list[float]:
     if (
         type(raw) is not list
         or len(raw) != 4
-        or any(type(x) not in (int, float) or not math.isfinite(x) for x in raw)
+        or any(type(x) not in (int, float) or not 0 <= x <= 1.000001 for x in raw)
     ):
         raise AssistantError("invalid_match_evidence")
     x, y, w, h = raw
@@ -201,6 +202,21 @@ def _text(value: object, limit: int) -> bool:
     )
 
 
+def _jpeg(value: object) -> bool:
+    """Match the native review's canonical base64/JPEG boundary validation."""
+    if type(value) is not str or len(value) > 250000:
+        return False
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (ValueError, UnicodeError):
+        return False
+    return (
+        raw.startswith(b"\xff\xd8")
+        and raw.endswith(b"\xff\xd9")
+        and base64.b64encode(raw).decode("ascii") == value
+    )
+
+
 def parse_candidates(raw: object) -> tuple[str, list[dict]]:
     """Strict provider answer: an overall reason and at most three seed pairs."""
     if (
@@ -221,7 +237,12 @@ def parse_candidates(raw: object) -> tuple[str, list[dict]]:
             or len(c["boxes"]) != 2
         ):
             raise AssistantError("invalid_match_evidence")
-        found.append(dict(reason=c["reason"], boxes=[list(box(b)) for b in c["boxes"]]))
+        boxes = [list(box(b)) for b in c["boxes"]]
+        # Seed requests use the helper's exact [0, 1] bounds. Track results retain
+        # box()'s tiny allowance for pixel-normalization rounding.
+        if any(b[0] + b[2] > 1 or b[1] + b[3] > 1 for b in boxes):
+            raise AssistantError("invalid_match_evidence")
+        found.append(dict(reason=c["reason"], boxes=boxes))
     return raw["reason"], found
 
 
@@ -349,18 +370,17 @@ def native_frames(
             result = decode(
                 media._output([helper, str(input_path)], maximum_bytes=512 * 1024)
             )
-        except AssistantError as exc:
-            if exc.code == "media_unreadable":
+        except MediaChildError as exc:
+            # matchtracker.cpp reserves status 5 for subject bounds/appearance rejection.
+            # Decoder errors, invalid requests, missing filters and crashes stay terminal.
+            if seed is not None and exc.returncode == 5:
                 raise AssistantError("tracking_unavailable") from exc
             raise
     fields(result, {"boxes", "first", "last"})
     if (
         type(result["boxes"]) is not list
         or len(result["boxes"]) != (length if seed else 0)
-        or any(
-            type(result[k]) is not str or len(result[k]) > 250000
-            for k in ("first", "last")
-        )
+        or any(not _jpeg(result[k]) for k in ("first", "last"))
     ):
         raise AssistantError("invalid_match_evidence")
     for b in result["boxes"]:
@@ -396,7 +416,7 @@ def _cached(entry: Path, windows: list[tuple[int, int]]) -> dict | None:
             )
             or type(preview) is not dict
             or set(preview) != {"outgoing", "incoming"}
-            or any(type(v) is not str or len(v) > 250000 for v in preview.values())
+            or any(not _jpeg(v) for v in preview.values())
         ):
             return None
         for t in tracked:
