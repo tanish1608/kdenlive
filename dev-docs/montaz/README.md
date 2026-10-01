@@ -16,6 +16,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 5. [macOS setup](macos-setup.md): beginner instructions for dependencies, build, and launch.
 6. [Implementation checklist](work-plan.md): chat milestone and footage-quality gates.
 7. [Output review](quality-review.md): exported footage, measurements and remaining quality gaps.
+8. [Engineering collaboration](collaboration.md): Claude's scoped assignment, isolated branch, validation and Codex review/merge workflow.
 
 ## Current state
 
