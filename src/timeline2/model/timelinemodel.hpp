@@ -289,6 +289,8 @@ public:
     Q_INVOKABLE bool isGroup(int id) const;
     /** @brief Helper function that returns true if the given ID is in a group */
     Q_INVOKABLE bool isInGroup(int id) const;
+    /** @brief Excludes the temporary group used for multiple selection. */
+    bool hasPersistentGroup(int id) const;
 
     /** @brief Returns all basic infos about a clip (position, crop, trackId, ...) */
     ItemInfo getItemInfo(int id) const;

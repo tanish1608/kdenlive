@@ -5926,6 +5926,13 @@ bool TimelineModel::isGroup(int id) const
     return m_allGroups.count(id) > 0;
 }
 
+bool TimelineModel::hasPersistentGroup(int id) const
+{
+    READ_LOCK();
+    const int parent = m_groups->getDirectAncestor(id);
+    return parent >= 0 && m_groups->getType(parent) != GroupType::Selection;
+}
+
 bool TimelineModel::isInGroup(int id) const
 {
     return m_groups->isInGroup(id);
