@@ -52,10 +52,21 @@ for native validation, single batch commit/undo/redo functions, rollback,
 duplicate/stale rejection, real worker communication, timeout, forced Stop,
 malformed/oversized/incomplete responses, launch failure/retry, and run records.
 
-**Unverified:** the dock/editor adapter compilation and the full Kdenlive timeline
-test (`tests/assistanttest.cpp`). Qt-only tests do not link KDE or MLT and do not
-prove playback, actual native undo, save/reopen, or export. The host currently lacks
-the complete KDE/MLT build environment; the feature remains off by default.
+On September 30 the full Craft build compiled the dock/editor adapter. Both
+`assistanttest` and upstream `utilstest` passed. The assistant test uses the real
+Kdenlive timeline to check six inserts, exact cut frames, one Undo/Redo, replay
+rejection, lock/unlock invalidation, and source bounds. Desktop preview, Apply,
+Undo/Redo, save/reopen, and seeking to the first cut were exercised using six
+silent synthetic clips with mixed frame rates and orientations.
+
+**Still unverified:** exported output, native insertion-failure injection,
+all project-switch/relink/profile interactions, and linked audio. The feature
+remains off by default. A Qt accessibility crash occurred while inspecting a
+closing file dialog; this is an unresolved SDK/UI automation limitation.
+
+On this Mac use `assistant/tools/run_craft_macos.sh` to launch the development
+build with Craft's library, MLT, and effects paths. The launcher does not package
+or change cached dependencies. Native CTest configures the macOS SDK paths itself.
 
 Before connecting providers, pass `assistanttest` and manually check:
 

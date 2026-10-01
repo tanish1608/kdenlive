@@ -58,6 +58,16 @@ foreach(_source ${KdenliveTest_SOURCES})
       LINK_LIBRARIES kdenliveLib
   )
   set_property(TARGET ${_targetname} PROPERTY CXX_STANDARD 14)
+  if(APPLE)
+    # Craft's libvpx uses a bare install name; LC_RPATH cannot resolve it.
+    # Scope the SDK library lookup to tests instead of changing cached binaries.
+    set_property(TEST ${_targetname} APPEND PROPERTY ENVIRONMENT
+        "DYLD_FALLBACK_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$ENV{DYLD_FALLBACK_LIBRARY_PATH}")
+    if(EXISTS "${CMAKE_INSTALL_PREFIX}/plugins/mlt")
+      set_property(TEST ${_targetname} APPEND PROPERTY ENVIRONMENT
+          "MLT_REPOSITORY=${CMAKE_INSTALL_PREFIX}/plugins/mlt")
+    endif()
+  endif()
   if(_targetname STREQUAL "assistanttest")
     set_property(TARGET ${_targetname} PROPERTY CXX_STANDARD 17)
   endif()

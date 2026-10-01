@@ -94,7 +94,10 @@ MltConnection::MltConnection(const QString &mltPath)
 
     // After initialising the MLT factory, set the locale back from user default to C
     // to ensure numbers are always serialised with . as decimal point.
-    m_repository = std::unique_ptr<Mlt::Repository>(Mlt::Factory::init());
+    // Relocatable MLT builds ignore MLT_REPOSITORY unless passed explicitly.
+    // Honor the development SDK override; otherwise retain bundle discovery.
+    const auto repositoryPath = qgetenv("MLT_REPOSITORY");
+    m_repository = std::unique_ptr<Mlt::Repository>(Mlt::Factory::init(repositoryPath.isEmpty() ? nullptr : repositoryPath.constData()));
 
 #ifdef Q_OS_FREEBSD
     setlocale(MLT_LC_CATEGORY, nullptr);

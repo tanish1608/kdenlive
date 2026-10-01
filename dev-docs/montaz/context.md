@@ -50,8 +50,10 @@ real output review are required. Use synthetic media for committed regressions.
    duplicate delivery, stale revision, locked track, rollback, undo/redo, stop,
    project switching, and save/reopen checks before connecting providers.
    The source for this slice now exists behind an off-by-default build option.
-   Qt-only transport/validation/rollback tests run locally; tests exercising the
-   real Kdenlive timeline are registered but await the complete build toolchain.
+   The Craft build now compiles the dock and adapter. Native `assistanttest` and
+   `utilstest` pass. Desktop preview/apply/undo/redo/save/reopen and seeking at the
+   first cut were exercised with synthetic mixed-rate and portrait sources.
+   Export and additional failure/sequence-switch checks remain open.
 3. **Grounded analysis/planner:** separate speech/visual caches, provider health,
    feasible-duration handling, generated music and honest review outcomes.
 4. **Travel recipes and captions:** postcards/adventure/diary, framing presets,
@@ -80,3 +82,12 @@ include in the standalone test target. No system toolchain files were changed.
 No public fork remote or release was created. `upstream` points to KDE Invent;
 do not push feature commits there. The clone is shallow; fetch additional history
 only when needed for a deliberate upstream update.
+
+On September 30 the user completed the full Craft build. Native test startup
+needed a scoped VPX library search path and correct discovery of Craft's
+`plugins/mlt` directory. Relocatable MLT ignores `MLT_REPOSITORY` unless the app
+passes it explicitly. The development launcher supplies SDK paths without
+modifying cached dependency binaries. A Qt macOS accessibility crash occurred
+when inspecting an import dialog as it closed; importing via the command line
+and inspecting the settled editor worked. The user accepted the working editor
+and requested moving on to assistant development; export testing was deferred.

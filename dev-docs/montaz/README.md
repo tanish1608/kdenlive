@@ -13,6 +13,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 2. [Migration context](context.md): decisions, previous failures, and work sequence.
 3. [Assistant foundation](../../assistant/README.md): implemented contracts and tests.
 4. [Upstream build guide](../build.md): native toolchain requirements.
+5. [macOS setup](macos-setup.md): beginner instructions for dependencies, build, and launch.
 
 ## Current state
 
@@ -22,10 +23,13 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Implemented and tested: proposal contracts, strict wire parsing, a deterministic
   Python worker, Qt process transport, bounded Stop/deadline handling, native-side
   validation, batch rollback/commit logic, and redacted run diagnostics.
-- Written behind `BUILD_MONTAZ_ASSISTANT=ON`, awaiting a full native build:
+- Compiled and exercised behind `BUILD_MONTAZ_ASSISTANT=ON`:
   dock, sequence snapshot/revision bridge, proposal list, and undoable application
   through Kdenlive's own insertion API. It is disabled in default builds.
-- Still pending: full editor compilation, GUI/save/reopen/export validation,
+- Native tests pass; desktop preview, Apply, Undo/Redo, save/reopen, and seeking
+  were exercised with six silent synthetic clips at 24/25/30 fps, including
+  portrait sources. macOS SDK/test loading fixes are included.
+- Still pending: export validation, additional native failure checks,
   provider integrations, audio pairing, and travel recipe execution. The current
   worker is a video-only integration diagnostic, not an editorial model.
 - See [native integration](native-integration.md) for exact verification limits.

@@ -5,6 +5,7 @@
 */
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
+#include "tests_definitions.h"
 
 #include <QApplication>
 #include <QFile>
@@ -23,25 +24,22 @@ Write your tests in a file with a name corresponding to what you're testing */
 
 QString getMltRepositoryPath()
 {
+    if (qEnvironmentVariableIsSet("MLT_REPOSITORY")) {
+        return qEnvironmentVariable("MLT_REPOSITORY");
+    }
     for (auto varname : {"CRAFT_ROOT", "KDEROOT"}) {
         if (!qEnvironmentVariableIsSet(varname)) {
             continue;
         }
 
         qDebug() << varname << "envvar is set, try to use it for MLT repository path";
-        QString repositoryPath = QDir::cleanPath(qgetenv(varname) + QDir::separator() + QStringLiteral("lib/mlt"));
-        if (!QFile::exists(repositoryPath)) {
-            qDebug() << repositoryPath << "does not exist ($" << varname << "/lib/mlt)";
-            QString repositoryPath = QDir::cleanPath(qgetenv(varname) + QDir::separator() + QStringLiteral("lib/mlt-7"));
+        for (const auto &relativePath : {QStringLiteral("lib/mlt"), QStringLiteral("lib/mlt-7"), QStringLiteral("plugins/mlt")}) {
+            const QString repositoryPath = QDir(qEnvironmentVariable(varname)).filePath(relativePath);
+            if (QDir(repositoryPath).exists()) {
+                qDebug() << "Using this path as MLT repository path:" << repositoryPath;
+                return repositoryPath;
+            }
         }
-        if (!QFile::exists(repositoryPath)) {
-            qDebug() << repositoryPath << "does not exist ($" << varname << "/lib/mlt-7)";
-            return {};
-        }
-
-        qDebug() << "Using this path as MLT repository path:" << repositoryPath;
-
-        return repositoryPath;
     }
     return {};
 }
@@ -69,7 +67,7 @@ int main(int argc, char *argv[])
     MltConnection::construct(QString());
     pCore->projectItemModel()->buildPlaylist(QUuid());
     // if Kdenlive is not installed, ensure we have one keyframable effect
-    EffectsRepository::get()->reloadCustom(QFileInfo("../data/effects/audiobalance.xml").absoluteFilePath());
+    EffectsRepository::get()->reloadCustom(QDir(sourcesPath).filePath(QStringLiteral("../data/effects/audiobalance.xml")));
 
     int result = Catch::Session().run(argc, argv);
     pCore->cleanup();
