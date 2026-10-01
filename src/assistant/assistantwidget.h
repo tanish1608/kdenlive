@@ -8,6 +8,9 @@
 class QLabel;
 class QListWidget;
 class QPushButton;
+class QComboBox;
+class QLineEdit;
+class QSpinBox;
 
 namespace Montaz {
 class EditorAdapter;
@@ -27,6 +30,10 @@ private:
     QPushButton *m_plan;
     QPushButton *m_stop;
     QPushButton *m_apply;
+    QComboBox *m_recipe;
+    QLineEdit *m_instruction;
+    QSpinBox *m_duration;
+    int m_requestedSeconds{0};
     QJsonObject m_snapshot;
     QJsonObject m_proposal;
 };

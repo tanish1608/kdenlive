@@ -13,6 +13,7 @@
 #include "timeline2/model/timelineitemmodel.hpp"
 
 #include <KLocalizedString>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QThread>
 #include <algorithm>
@@ -119,6 +120,21 @@ QJsonObject Montaz::EditorAdapter::snapshot()
         {QStringLiteral("tracks"), tracks},
         {QStringLiteral("occupied"), occupied}};
     return validateSnapshot(snapshot).isEmpty() ? snapshot : QJsonObject{};
+}
+
+QJsonObject Montaz::EditorAdapter::mediaSources(const QJsonObject &context)
+{
+    if (snapshot() != context) return {};
+    QJsonObject sources;
+    for (const auto &value : context.value(QStringLiteral("assets")).toArray()) {
+        const auto asset = value.toObject();
+        if (!asset.value(QStringLiteral("has_video")).toBool()) continue;
+        const auto id = asset.value(QStringLiteral("bin_id")).toString();
+        const auto clip = pCore->projectItemModel()->getClipByBinID(id);
+        if (!clip || !QFileInfo(clip->clipUrl()).isFile()) return {};
+        sources.insert(id, QFileInfo(clip->clipUrl()).absoluteFilePath());
+    }
+    return sources;
 }
 
 QString Montaz::EditorAdapter::apply(const QJsonObject &proposal)

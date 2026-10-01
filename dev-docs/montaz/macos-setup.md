@@ -135,8 +135,11 @@ PYTHONPATH=assistant/src "$KDENLIVE_ASSISTANT_PYTHON" \
 ```
 
 In the editor, open **View → AI Assistant**, import a few small videos, open a
-sequence, choose **Preview shots**, and inspect the list before **Apply edit**.
-The current worker proposes up to six video-only shots without provider calls.
+sequence, enter a brief, choose a travel preset and duration, then **Plan edit**.
+Inspect the list before **Apply edit**. Gemini uses a private settings file or
+`GEMINI_API_KEY`; see [assistant configuration](../../assistant/README.md).
+The current planner creates video-only cuts; narration, sound and captions follow
+in later milestones. Set `MONTAZ_ASSISTANT_DEMO=1` for the offline diagnostic.
 Verify one Undo removes the whole edit and Redo restores it. Full playback,
 save/reopen and seeking were exercised locally. Export and additional native
 failure checks remain required; see

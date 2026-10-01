@@ -19,6 +19,7 @@ public:
     explicit EditorAdapter(QObject *parent = nullptr);
     void refreshContext();
     QJsonObject snapshot();
+    QJsonObject mediaSources(const QJsonObject &snapshot);
     QString apply(const QJsonObject &proposal);
 
 Q_SIGNALS:

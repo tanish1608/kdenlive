@@ -91,3 +91,14 @@ modifying cached dependency binaries. A Qt macOS accessibility crash occurred
 when inspecting an import dialog as it closed; importing via the command line
 and inspecting the settled editor worked. The user accepted the working editor
 and requested moving on to assistant development; export testing was deferred.
+
+The user then selected **Keep Gemini**. The native dock now sends local media
+references and briefs to a bounded worker. Visual observations are content-cached,
+with two videos processed concurrently. Three travel pacing presets constrain
+model cuts. Repeated content, unsupported windows, overflow, poor observations,
+and excessive durations are rejected. API configuration was migrated to a private
+user settings file. Live synthetic Gemini runs took 9.16 s and 2.14 s (all three
+analyses cached on retry), each proposing 225 frames at 25 fps. Desktop Plan/Apply,
+Stop, cached retry, and duration-shortfall reporting were exercised. Narration,
+ElevenLabs music/effects, captions, full temporal analysis and quality review remain
+open; do not describe this first visual planner as a completed production editor.

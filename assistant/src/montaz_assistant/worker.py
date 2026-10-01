@@ -2,10 +2,15 @@
 # SPDX-FileCopyrightText: 2026 Montaz contributors
 """One deterministic diagnostic request per process; no provider calls."""
 
+import os
+import signal
 import sys
+from pathlib import Path
 
 from .contracts import InsertClip, Proposal, ProposalError, validate_proposal
+from .gemini import AssistantError, Gemini
 from .lifecycle import Run, Status
+from .planning import MediaTools, brief_from_wire, plan_media
 from .protocol import MAX_MESSAGE_BYTES, decode, encode, fields, frame, snapshot_from_wire, to_wire
 
 
@@ -44,30 +49,81 @@ def main() -> int:
     output = sys.stdout.buffer
     output.write(encode({"version": 1, "type": "ready"}))
     output.flush()
+    media = MediaTools()
+    signal.signal(signal.SIGTERM, lambda *_: media.cancel())
+
+    def send_event(event):
+        output.write(encode({"version": 1, "type": "event", **to_wire(event)}))
+        output.flush()
+
+    def progress(phase, completed, cached, total):
+        output.write(
+            encode(
+                {
+                    "version": 1,
+                    "type": "progress",
+                    "phase": phase,
+                    "completed": completed,
+                    "cached": cached,
+                    "total": total,
+                    "model": provider.model,
+                }
+            )
+        )
+        output.flush()
+
     try:
         line = sys.stdin.buffer.readline(MAX_MESSAGE_BYTES + 1)
-        request = fields(decode(line), {"version", "type", "request_id", "snapshot"})
+        request = decode(line)
+        keys = {"version", "type", "request_id", "snapshot"}
+        real = request.get("type") == "plan_media"
+        fields(request, keys | {"sources", "brief"} if real else keys)
         if (
             type(request["version"]) is not int
             or request["version"] != 1
-            or request["type"] != "plan_demo"
+            or request["type"] not in {"plan_demo", "plan_media"}
         ):
             raise ProposalError("Unsupported request")
         # Validate request IDs through the same typed proposal constructor.
         snapshot = snapshot_from_wire(request["snapshot"])
-        proposal = propose_demo(snapshot, request["request_id"])
-        run = Run(proposal.request_id, ("planner",))
+        request_id = request["request_id"]
+        if type(request_id) is not str or not request_id or len(request_id) > 128:
+            raise ProposalError("Invalid request ID")
+        run = Run(request_id, ("planner",))
+        send_event(run.events[-1])
         run.transition("planner", Status.RUNNING)
+        send_event(run.events[-1])
+        if real:
+            brief = brief_from_wire(request["brief"])
+            provider = Gemini.configured()  # Missing keys fail before media/provider work.
+            cache = Path(
+                os.environ.get("MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis")
+            )
+            proposal = plan_media(
+                snapshot, request_id, request["sources"], brief, cache, provider, media, progress
+            )
+        else:
+            proposal = propose_demo(snapshot, request_id)
         run.transition("planner", Status.COMPLETED)
+        send_event(run.events[-1])
         run.finish()
-        for event in run.events:
-            output.write(encode({"version": 1, "type": "event", **to_wire(event)}))
+        send_event(run.events[-1])
         output.write(encode({"version": 1, "type": "proposal", "proposal": to_wire(proposal)}))
         output.flush()
         return 0
-    except (ProposalError, TypeError, KeyError, AttributeError, RecursionError):
+    except (
+        ProposalError,
+        AssistantError,
+        OSError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        RecursionError,
+    ) as exc:
+        media.cancel()
         # Avoid reflecting arbitrary input, credentials, or source paths in diagnostics.
-        output.write(encode({"version": 1, "type": "error", "code": "invalid_request"}))
+        code = exc.code if isinstance(exc, AssistantError) else "invalid_request"
+        output.write(encode({"version": 1, "type": "error", "code": code}))
         output.flush()
         return 2
 

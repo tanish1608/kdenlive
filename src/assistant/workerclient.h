@@ -14,7 +14,7 @@ class WorkerClient : public QObject
 public:
     explicit WorkerClient(QString python, QString sourceDirectory, QObject *parent = nullptr, int deadlineMs = 30000);
     ~WorkerClient() override;
-    bool start(const QJsonObject &snapshot);
+    bool start(const QJsonObject &snapshot, const QJsonObject &context = {});
     void stop();
     bool busy() const { return m_busy; }
     void recordApply(const QString &requestId, const QString &resultCode);
@@ -44,6 +44,11 @@ private:
     QString m_logPath;
     int m_sequence{0};
     int m_outputBytes{0};
+    int m_defaultDeadline;
+    int m_progressCompleted{0};
+    int m_progressCached{0};
+    bool m_mediaRequest{false};
+    bool m_planningProgressReceived{false};
     bool m_ready{false};
     bool m_completed{false};
     bool m_busy{false};

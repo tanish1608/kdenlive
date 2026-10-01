@@ -23,6 +23,9 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Implemented and tested: proposal contracts, strict wire parsing, a deterministic
   Python worker, Qt process transport, bounded Stop/deadline handling, native-side
   validation, batch rollback/commit logic, and redacted run diagnostics.
+- Gemini visual analysis/planning now drives the dock: brief, requested duration,
+  travel postcard/adventure/diary pacing, content-addressed evidence caching,
+  two-video concurrency, provider errors, Stop, and a run-log shortcut.
 - Compiled and exercised behind `BUILD_MONTAZ_ASSISTANT=ON`:
   dock, sequence snapshot/revision bridge, proposal list, and undoable application
   through Kdenlive's own insertion API. It is disabled in default builds.
@@ -30,8 +33,9 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   were exercised with six silent synthetic clips at 24/25/30 fps, including
   portrait sources. macOS SDK/test loading fixes are included.
 - Still pending: export validation, additional native failure checks,
-  provider integrations, audio pairing, and travel recipe execution. The current
-  worker is a video-only integration diagnostic, not an editorial model.
+  narration, audio pairing, ElevenLabs music/effects, subtitle styling, and deeper
+  travel recipe execution. The planner uses sampled visual evidence and inserts
+  video only; real-footage editorial quality and exported output need review.
 - See [native integration](native-integration.md) for exact verification limits.
 
 ## First integration milestone
@@ -42,7 +46,7 @@ the proposed changes, and applies an approved proposal as one undoable native
 operation. A manual edit invalidates an outstanding proposal. Replayed messages
 cannot insert a second copy of the sequence.
 
-The current implementation uses a deterministic six-clip proposal before connecting any
-model. Verify apply, undo, redo, seek, save/reopen, cancellation, and export.
-Then connect the planner and evaluate real footage. This isolates integration
-failures from model-quality failures.
+The diagnostic remains available with `MONTAZ_ASSISTANT_DEMO=1`. The normal panel
+uses Gemini. Synthetic live checks produced three grounded shots; a repeat reused
+all analyses (9.16 s first run, 2.14 s cached). Native UI planning, Apply, Stop,
+and retry were exercised. Continue with real-footage quality review and export.

@@ -19,6 +19,12 @@ server, WebSocket, CRDT, or agent messaging framework. Logs go to stderr or a
 project-local run directory; stdout is protocol only. Bound message sizes and
 validate both sides. Provider credentials stay in the worker's private settings.
 
+The implemented visual worker accepts `plan_media` with a separate mapping of
+editor bin IDs to local source paths plus a brief/duration/pacing recipe. Paths
+are input media references, never edit operations. They stay out of run logs.
+`plan_demo` retains the deterministic integration diagnostic. Both return the
+same insertion proposal and require a clean worker exit before Apply.
+
 ## Snapshot and proposal
 
 The native adapter issues a snapshot with project ID, sequence ID, monotonically
@@ -73,6 +79,12 @@ Templates are versioned data: story slots, shot duration ranges, transition
 allowlist, framing, text style, music arc, and fallback rules. Begin with travel
 postcard, adventure montage, and travel diary. Do not fabricate missing footage
 or repeat shots merely to reach a requested duration.
+
+The first visual planner implements three pacing presets, two-video analysis
+concurrency and a content-addressed observations cache. It samples two frames in
+each first/middle/last six-second window. Model observations are explicitly
+limited to those samples; full temporal analysis, speech, music/beat alignment,
+framing, transitions and subtitle style operations are not implemented yet.
 
 ## Runs and cancellation
 

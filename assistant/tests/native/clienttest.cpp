@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -246,6 +247,55 @@ private Q_SLOTS:
         QVERIFY(client.start(snapshot()));
         QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 5000);
         QVERIFY(ready[0][0].toJsonObject()["request_id"] != ready[1][0].toJsonObject()["request_id"]);
+    }
+    void missingGeminiKeyIsExplicitAndSourcePathsAreNotLogged()
+    {
+        QTemporaryDir temp;
+        const auto oldKey = qgetenv("GEMINI_API_KEY"), oldConfig = qgetenv("MONTAZ_ASSISTANT_CONFIG");
+        const auto restore = qScopeGuard([oldKey, oldConfig]() {
+            qputenv("GEMINI_API_KEY", oldKey);
+            qputenv("MONTAZ_ASSISTANT_CONFIG", oldConfig);
+        });
+        qputenv("GEMINI_API_KEY", "");
+        qputenv("MONTAZ_ASSISTANT_CONFIG", (temp.path() + QStringLiteral("/empty.json")).toUtf8());
+        QJsonObject sources;
+        for (int i = 1; i <= 6; ++i)
+            sources.insert(QString::number(i), QStringLiteral("/private/never-log-this.mp4"));
+        const QJsonObject context{{"sources", sources},
+                                  {"brief", QJsonObject{{"duration_seconds", 60}, {"recipe", "postcard"}, {"instruction", "private brief"}}}};
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), qEnvironmentVariable("MONTAZ_TEST_SOURCE"));
+        QSignalSpy failures(&client, &Montaz::WorkerClient::failed), ready(&client, &Montaz::WorkerClient::proposalReady);
+        QVERIFY(client.start(snapshot(), context));
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 5000);
+        QCOMPARE(failures[0][0].toString(), QStringLiteral("missing_api_key"));
+        QCOMPARE(ready.count(), 0);
+        const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+        for (const auto &name : QDir(directory).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+            QFile log(directory + name);
+            QVERIFY(log.open(QIODevice::ReadOnly));
+            const auto bytes = log.readAll();
+            QVERIFY(!bytes.contains("never-log-this"));
+            QVERIFY(!bytes.contains("private brief"));
+        }
+    }
+    void malformedMediaProgressCannotFinishAPlan()
+    {
+        const QByteArray script = R"PY(import json,sys
+r=json.loads(sys.stdin.readline())
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n in (1,2):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'planner','status':'running','reason':''})
+send({'type':'progress','phase':'analysis','completed':0.5,'cached':0,'total':6})
+)PY";
+        QTemporaryDir temp;
+        fakeWorker(temp.path(), script);
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+        QSignalSpy failures(&client, &Montaz::WorkerClient::failed), ready(&client, &Montaz::WorkerClient::proposalReady);
+        QVERIFY(client.start(snapshot(), {{"sources", QJsonObject{}}, {"brief", QJsonObject{}}}));
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 5000);
+        QCOMPARE(failures[0][0].toString(), QStringLiteral("invalid_worker_progress"));
+        QCOMPARE(ready.count(), 0);
     }
     void stopKillsUncooperativeWorker()
     {

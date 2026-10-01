@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUuid>
 
@@ -16,6 +17,7 @@ Montaz::WorkerClient::WorkerClient(QString python, QString sourceDirectory, QObj
     : QObject(parent)
     , m_python(std::move(python))
     , m_sourceDirectory(std::move(sourceDirectory))
+    , m_defaultDeadline(deadlineMs)
 {
     m_deadline.setSingleShot(true);
     m_deadline.setInterval(deadlineMs);
@@ -46,7 +48,7 @@ Montaz::WorkerClient::~WorkerClient()
     }
 }
 
-bool Montaz::WorkerClient::start(const QJsonObject &snapshot)
+bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject &context)
 {
     if (m_busy || !validateSnapshot(snapshot).isEmpty()) return false;
     m_snapshot = snapshot;
@@ -62,16 +64,25 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot)
     m_ready = false;
     m_completed = false;
     m_cancelled = false;
-    const QJsonObject request{{QStringLiteral("version"), 1},
-                              {QStringLiteral("type"), QStringLiteral("plan_demo")},
-                              {QStringLiteral("request_id"), m_requestId},
-                              {QStringLiteral("snapshot"), snapshot}};
+    m_mediaRequest = !context.isEmpty();
+    m_planningProgressReceived = false;
+    m_progressCompleted = m_progressCached = 0;
+    QJsonObject request{{QStringLiteral("version"), 1},
+                        {QStringLiteral("type"), m_mediaRequest ? QStringLiteral("plan_media") : QStringLiteral("plan_demo")},
+                        {QStringLiteral("request_id"), m_requestId},
+                        {QStringLiteral("snapshot"), snapshot}};
+    if (m_mediaRequest) {
+        if (context.size() != 2 || !context.value(QStringLiteral("sources")).isObject() || !context.value(QStringLiteral("brief")).isObject()) return false;
+        request.insert(QStringLiteral("sources"), context.value(QStringLiteral("sources")));
+        request.insert(QStringLiteral("brief"), context.value(QStringLiteral("brief")));
+    }
     const auto line = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
     if (line.size() > MaxMessageBytes) return false;
     auto environment = QProcessEnvironment::systemEnvironment();
     // Use only this checkout's assistant package, not modules from another project.
     environment.insert(QStringLiteral("PYTHONPATH"), m_sourceDirectory);
     environment.insert(QStringLiteral("PYTHONNOUSERSITE"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("MONTAZ_ANALYSIS_CACHE"), cache + QStringLiteral("/montaz/analysis"));
     m_process.setProcessEnvironment(environment);
     m_process.setWorkingDirectory(m_sourceDirectory);
     m_process.setProgram(m_python);
@@ -79,7 +90,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot)
     m_busy = true;
     record(QStringLiteral("started"), {{QStringLiteral("assets"), snapshot.value(QStringLiteral("assets")).toArray().size()},
                                        {QStringLiteral("revision"), snapshot.value(QStringLiteral("revision"))}});
-    m_deadline.start();
+    m_deadline.start(m_mediaRequest ? 180000 : m_defaultDeadline);
     Q_EMIT busyChanged(true);
     m_process.start();
     m_process.write(line);
@@ -147,11 +158,54 @@ void Montaz::WorkerClient::readOutput()
                 abort(QStringLiteral("invalid_worker_event"));
                 return;
             }
+            if (m_mediaRequest && m_sequence == 4 && !m_planningProgressReceived) {
+                abort(QStringLiteral("invalid_worker_event"));
+                return;
+            }
             m_completed = m_sequence == 4;
             record(QStringLiteral("stage"), {{QStringLiteral("sequence"), m_sequence},
                                              {QStringLiteral("stage"), message.value(QStringLiteral("stage"))},
                                              {QStringLiteral("status"), status}});
             Q_EMIT eventReceived(message);
+        } else if (type == QStringLiteral("progress") && m_mediaRequest && m_ready && m_sequence == 2 && !m_completed) {
+            const auto phase = message.value(QStringLiteral("phase")).toString();
+            const auto model = message.value(QStringLiteral("model")).toString();
+            const int total = message.value(QStringLiteral("total")).toInt(-1);
+            const int completed = message.value(QStringLiteral("completed")).toInt(-1);
+            const int cached = message.value(QStringLiteral("cached")).toInt(-1);
+            int videos = 0;
+            for (const auto &value : m_snapshot.value(QStringLiteral("assets")).toArray())
+                videos += value.toObject().value(QStringLiteral("has_video")).toBool();
+            if (message.size() != 7 || !QRegularExpression(QStringLiteral("^gemini-[a-zA-Z0-9.-]{1,100}$")).match(model).hasMatch() || total != videos ||
+                completed < m_progressCompleted || completed > total || cached < m_progressCached || cached > completed ||
+                message.value(QStringLiteral("completed")) != completed || message.value(QStringLiteral("cached")) != cached ||
+                message.value(QStringLiteral("total")) != total || (phase != QStringLiteral("analysis") && phase != QStringLiteral("planning")) ||
+                (phase == QStringLiteral("planning") && completed != total) || (phase == QStringLiteral("analysis") && m_planningProgressReceived)) {
+                abort(QStringLiteral("invalid_worker_progress"));
+                return;
+            }
+            m_progressCompleted = completed;
+            m_progressCached = cached;
+            m_planningProgressReceived = phase == QStringLiteral("planning");
+            record(QStringLiteral("progress"), {{QStringLiteral("provider"), QStringLiteral("gemini")},
+                                                {QStringLiteral("model"), model},
+                                                {QStringLiteral("phase"), phase},
+                                                {QStringLiteral("completed"), completed},
+                                                {QStringLiteral("cached"), cached},
+                                                {QStringLiteral("total"), total}});
+            Q_EMIT eventReceived(message);
+        } else if (type == QStringLiteral("error") && m_ready && !m_completed && message.size() == 3) {
+            const auto code = message.value(QStringLiteral("code")).toString();
+            const QStringList allowed{QStringLiteral("missing_api_key"),        QStringLiteral("invalid_settings"),
+                                      QStringLiteral("invalid_brief"),          QStringLiteral("provider_auth"),
+                                      QStringLiteral("provider_unavailable"),   QStringLiteral("provider_timeout"),
+                                      QStringLiteral("invalid_model_response"), QStringLiteral("invalid_analysis"),
+                                      QStringLiteral("invalid_plan"),           QStringLiteral("invalid_sources"),
+                                      QStringLiteral("no_video_track"),         QStringLiteral("media_changed"),
+                                      QStringLiteral("media_unreadable"),       QStringLiteral("media_timeout"),
+                                      QStringLiteral("invalid_request"),        QStringLiteral("cancelled")};
+            abort(allowed.contains(code) ? code : QStringLiteral("worker_rejected_request"));
+            return;
         } else if (type == QStringLiteral("proposal") && m_ready && m_completed && m_proposal.isEmpty() && message.size() == 3 &&
                    message.value(QStringLiteral("proposal")).isObject()) {
             const auto proposal = message.value(QStringLiteral("proposal")).toObject();
@@ -175,9 +229,9 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
     m_deadline.stop();
     m_killTimer.stop();
     const bool cancelled = m_cancelled;
-    QString failure = m_failure;
+    QString failure = cancelled ? QString() : m_failure;
     const auto proposal = m_proposal;
-    if (failure.isEmpty() && (exitCode != 0 || exitStatus != QProcess::NormalExit || proposal.isEmpty() || !m_buffer.isEmpty()))
+    if (!cancelled && failure.isEmpty() && (exitCode != 0 || exitStatus != QProcess::NormalExit || proposal.isEmpty() || !m_buffer.isEmpty()))
         failure = QStringLiteral("worker_incomplete");
     m_busy = false;
     m_proposal = {};
