@@ -82,7 +82,41 @@ footage paths/descriptions/briefs/shot reasons and provider stderr are excluded.
 
 Gemini uses the official [GenerateContent REST API](https://ai.google.dev/api/generate-content)
 with JSON output, followed by strict local/native validation. Narration, source
-audio pairing, music/effects, subtitle styling, and beat-based editing remain pending.
+audio pairing, sound effects, subtitle styling, and beat-based editing remain pending.
+
+## Instrumental music
+
+After applying the video edit, save the project and choose **Add music**. The
+worker uses ElevenLabs' [Music API](https://elevenlabs.io/docs/api-reference/music/compose)
+with `force_instrumental=true` and a duration derived from the actual video span,
+independent of the requested draft duration. Choose a travel pacing preset for
+the mood. The current brief adds editorial context. Listen to the proposed track,
+then **Apply music** imports and inserts it on a free unlocked audio track. One
+native Undo reverses both operations. Existing audio is preserved; automatic
+ducking and sound effects are not implemented.
+
+Set `ELEVENLABS_API_KEY` or `elevenlabs_api_key` in the same private assistant
+settings. `ELEVENLABS_MUSIC_MODEL` / `elevenlabs_music_model` defaults to
+`music_v2_5`. A missing key, denied music access or unusable output ends the run.
+Generation has a 90-second network timeout and a three-minute native deadline;
+Stop terminates local work but cannot revoke an already submitted provider job.
+Provider usage may still be charged. No automatic provider retry occurs.
+
+Generated WAVs and content-addressed reuse copies live in
+`<saved-project-name>.assets/music/` beside the project. Keep that directory with
+the project when moving or sharing it. Raw provider responses are retained too,
+so encoding failures can retry locally without another generation. Successful prepared tracks are reused
+for matching mood, brief, duration, model and FPS. Stop preserves completed
+preparation. Invalid stored audio fails validation instead of silently requesting
+another paid generation. No keys, audio or generated projects belong in Git.
+
+Preparation uses stereo 48 kHz PCM, an -18 LUFS loudness target and half-second
+opening/ending fades baked into the WAV. Native gain remains editable. Validation
+rejects silence and output more than one project frame short. MP3 block rounding
+may leave a smaller gap; only that final gap is padded before fading, never
+stretched. Prepared WAV duration matches the timeline within one sample. Energy accents are
+measured in project frames; they are not verified beats and do not move cuts.
+Music preview uses Qt audio; Kdenlive remains the timeline playback authority.
 
 Compile and exercise the actual Qt process transport, native validator, and
 batch rollback logic using an installed Qt development environment:

@@ -47,6 +47,35 @@ QJsonObject proposal()
             {"protocol_version", 1}};
 }
 
+QJsonObject musicSnapshot()
+{
+    auto value = snapshot();
+    value["occupied"] = QJsonArray{QJsonObject{{"instance_id", "shot"}, {"track_id", "1"}, {"start_frame", 20}, {"duration_frames", 120}}};
+    return value;
+}
+
+QJsonObject musicSpec()
+{
+    return {{"path", "/private/project.assets/music/track.wav"}, {"track_id", "2"}, {"start_frame", 20}, {"duration_frames", 120}, {"recipe", "postcard"},
+            {"instruction", "private editorial brief"}};
+}
+
+QJsonObject soundtrack()
+{
+    auto value = musicSpec();
+    value.remove("recipe");
+    value.remove("instruction");
+    value["request_id"] = "request";
+    value["project_id"] = "project";
+    value["sequence_id"] = "sequence";
+    value["base_revision"] = 2;
+    value["frame_rate"] = musicSnapshot()["frame_rate"];
+    value["sha256"] = QString(64, 'a');
+    value["accents"] = QJsonArray{15, 60, 90};
+    value["cached"] = false;
+    return value;
+}
+
 void fakeWorker(const QString &path, const QByteArray &script)
 {
     QVERIFY(QDir().mkpath(path + QStringLiteral("/montaz_assistant")));
@@ -70,6 +99,83 @@ private Q_SLOTS:
     {
         QVERIFY(Montaz::validateProposal(snapshot(), proposal()).isEmpty());
         QCOMPARE(Montaz::validateProposal(snapshot(), proposal(), {QStringLiteral("request")}), QStringLiteral("already_applied"));
+    }
+    void musicIsBoundToTheIssuedPathSpanTrackAndRevision()
+    {
+        QVERIFY(Montaz::validateMusicRequest(musicSnapshot(), musicSpec()).isEmpty());
+        QVERIFY(Montaz::validateSoundtrack(musicSnapshot(), musicSpec(), soundtrack()).isEmpty());
+        for (const auto &change :
+             {QJsonObject{{"path", "/different.wav"}}, QJsonObject{{"track_id", "1"}}, QJsonObject{{"start_frame", 0}}, QJsonObject{{"duration_frames", 119}},
+              QJsonObject{{"base_revision", 3}}, QJsonObject{{"cached", 1}}, QJsonObject{{"accents", QJsonArray{60, 15}}},
+              QJsonObject{{"accents", QJsonArray{120}}}, QJsonObject{{"sha256", "not-a-hash"}}}) {
+            auto value = soundtrack();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                value[it.key()] = it.value();
+            QVERIFY(!Montaz::validateSoundtrack(musicSnapshot(), musicSpec(), value).isEmpty());
+        }
+        auto editor = musicSnapshot();
+        auto tracks = editor["tracks"].toArray();
+        auto audio = tracks[1].toObject();
+        audio["locked"] = true;
+        tracks[1] = audio;
+        editor["tracks"] = tracks;
+        QVERIFY(!Montaz::validateMusicRequest(editor, musicSpec()).isEmpty());
+        editor = musicSnapshot();
+        auto occupied = editor["occupied"].toArray();
+        occupied.append(QJsonObject{{"instance_id", "sound"}, {"track_id", "2"}, {"start_frame", 139}, {"duration_frames", 1}});
+        editor["occupied"] = occupied;
+        QVERIFY(!Montaz::validateMusicRequest(editor, musicSpec()).isEmpty());
+    }
+    void musicRequiresOrderedProgressMatchingResultAndCleanExit()
+    {
+        const QByteArray script = R"PY(import json,sys,signal,time
+r=json.loads(sys.stdin.readline())
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n in (1,2):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'music','status':'running','reason':''})
+send({'type':'music_progress','phase':'generation','model':'music_v2_5','cached':False})
+FAULT
+send({'type':'music_progress','phase':'measurement','model':'music_v2_5','cached':False})
+for n in (3,4):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==4 else 'music','status':'completed','reason':''})
+s=r['snapshot']; spec=r['music']
+p={k:spec[k] for k in ('path','track_id','start_frame','duration_frames')}
+p.update(request_id=r['request_id'],project_id=s['project_id'],sequence_id=s['sequence_id'],base_revision=s['revision'],frame_rate=s['frame_rate'],sha256='a'*64,accents=[15,60],cached=False)
+CHANGE
+send({'type':'soundtrack','soundtrack':p})
+EXIT
+)PY";
+        for (int fault = 0; fault < 5; ++fault) {
+            QTemporaryDir temp;
+            auto worker = script;
+            worker.replace("FAULT", fault == 3   ? "send({'type':'music_progress','phase':'generation','model':'music_v2_5','cached':False})"
+                                    : fault == 4 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)"
+                                                 : "pass");
+            worker.replace("CHANGE", fault == 1 ? "p['path']='/unissued.wav'" : "pass");
+            worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::soundtrackReady), failures(&client, &Montaz::WorkerClient::failed),
+                stopped(&client, &Montaz::WorkerClient::stopped), events(&client, &Montaz::WorkerClient::eventReceived);
+            QVERIFY(client.start(musicSnapshot(), {{"music", musicSpec()}}));
+            if (fault == 4) {
+                QTRY_COMPARE_WITH_TIMEOUT(events.count(), 3, 3000);
+                client.stop();
+            }
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
+            QCOMPARE(failures.count(), fault > 0 && fault != 4 ? 1 : 0);
+            QCOMPARE(stopped.count(), fault == 4 ? 1 : 0);
+            const auto logs = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+            for (const auto &name : QDir(logs).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+                QFile file(logs + name);
+                QVERIFY(file.open(QIODevice::ReadOnly));
+                const auto bytes = file.readAll();
+                QVERIFY(!bytes.contains("project.assets"));
+                QVERIFY(!bytes.contains("private editorial brief"));
+            }
+        }
     }
     void editorialReviewCannotInventShotsOrMisstateDuration()
     {

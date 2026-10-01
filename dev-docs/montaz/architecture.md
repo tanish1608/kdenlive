@@ -25,6 +25,14 @@ are input media references, never edit operations. They stay out of run logs.
 `plan_demo` retains the deterministic integration diagnostic. Both return the
 same insertion proposal and require a clean worker exit before Apply.
 
+`compose_music` is a separate resource request. The adapter issues an immutable
+video span, free audio track and unique WAV destination beside the saved project.
+The worker returns that same context, path, exact project-frame duration and
+content checksum. The native adapter rechecks revision, track occupancy, checksum
+and MLT stream/duration before importing and inserting in one undoable batch.
+It never executes a provider-selected path or edits the project file. Music
+generation has one bounded request; cache reuse avoids automatic regeneration.
+
 ## Snapshot and proposal
 
 The native adapter issues a snapshot with project ID, sequence ID, monotonically
@@ -87,8 +95,10 @@ Analysis version `video-windows-4` includes suggested usable trim offsets; local
 checks bound them to visible source frames. Sub-second sources are skipped and
 low-quality windows excluded. Plans use distinct usable ranges, opening/detail/
 activity/ending guidance, and per-shot reasons. Sampled analysis cannot guarantee
-frame-perfect motion or good storytelling. Speech, music/beat alignment, framing,
-transitions and subtitle style operations remain pending.
+frame-perfect motion or good storytelling. Instrumental music can follow an
+applied visual edit; it measures energy accents without retiming cuts. Speech,
+beat/phrase alignment, sound effects, framing, transitions and subtitle style
+operations remain pending. Portrait framing is deferred by the user.
 
 Optional editorial review metadata accompanies the existing insertion contract;
 native validation binds its shot identities and durations to the proposal. The UI

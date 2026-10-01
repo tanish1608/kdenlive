@@ -11,6 +11,7 @@
 #include "core.h"
 
 #include <KLocalizedString>
+#include <QAudioOutput>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QGroupBox>
@@ -19,6 +20,7 @@
 #include <QJsonArray>
 #include <QLabel>
 #include <QListWidget>
+#include <QMediaPlayer>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
@@ -59,6 +61,10 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     options->addWidget(m_recipe, 1);
     options->addWidget(m_duration);
     layout->addLayout(options);
+    m_music = new QPushButton(QIcon::fromTheme(QStringLiteral("audio-x-generic")), i18n("Add music"), this);
+    m_music->setToolTip(i18n("Compose an ElevenLabs instrumental for the current timeline. Save the project first."));
+    layout->addWidget(m_music);
+    connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
     m_tasks = new QTreeWidget(this);
     m_tasks->setObjectName(QStringLiteral("assistantTasks"));
     m_tasks->setAccessibleName(i18n("Edit plan"));
@@ -89,6 +95,29 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             [this](QListWidgetItem *item) { m_shotReason->setText(item ? item->data(Qt::UserRole).toString() : QString()); });
     m_apply = new QPushButton(QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Apply edit"), m_previewCard);
     m_apply->setEnabled(false);
+    m_audioPreview = new QMediaPlayer(this);
+    auto audioOutput = new QAudioOutput(this);
+    audioOutput->setVolume(0.6);
+    m_audioPreview->setAudioOutput(audioOutput);
+    m_listen = new QPushButton(i18n("Listen"), m_previewCard);
+    m_listen->setAccessibleName(i18n("Preview proposed music"));
+    m_listen->setCheckable(true);
+    m_listen->hide();
+    previewLayout->addWidget(m_listen);
+    connect(m_listen, &QPushButton::toggled, this, [this](bool playing) {
+        if (playing)
+            m_audioPreview->play();
+        else
+            m_audioPreview->stop();
+        m_listen->setText(playing ? i18n("Stop preview") : i18n("Listen"));
+    });
+    connect(m_audioPreview, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::EndOfMedia || status == QMediaPlayer::InvalidMedia) m_listen->setChecked(false);
+    });
+    connect(m_audioPreview, &QMediaPlayer::errorOccurred, this, [this]() {
+        m_listen->setChecked(false);
+        m_status->setText(i18n("Audio preview is unavailable. You can inspect the generated track after applying it."));
+    });
     previewLayout->addWidget(m_apply);
     m_previewCard->hide();
     layout->addWidget(m_previewCard);
@@ -117,6 +146,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     connect(m_worker, &WorkerClient::busyChanged, this, [this](bool busy) {
         m_plan->setEnabled(!busy);
+        m_music->setEnabled(!busy);
         m_stop->setEnabled(busy);
         m_newBrief->setEnabled(!busy);
         m_chat->setBusy(busy);
@@ -136,12 +166,26 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(i18n("Stopped"));
-        reply(i18n("Stopped. Completed footage analysis is saved for your next attempt."));
+        reply(m_musicMode ? i18n("Stopped. No audio was applied. Completed music is kept for reuse; ElevenLabs may still finish a submitted request.")
+                          : i18n("Stopped. Completed footage analysis is saved for your next attempt."));
     });
     connect(m_worker, &WorkerClient::failed, this, [this](const QString &code) {
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(i18n("Failed"));
+        if (m_musicMode) {
+            if (code == QStringLiteral("missing_music_key"))
+                reply(i18n("ElevenLabs is not configured. Set ELEVENLABS_API_KEY or elevenlabs_api_key in the private assistant settings."));
+            else if (code == QStringLiteral("music_auth"))
+                reply(i18n("ElevenLabs rejected access to music. Check the key and its music permissions. No audio was applied."));
+            else if (code == QStringLiteral("music_timeout") || code == QStringLiteral("worker_timeout"))
+                reply(i18n("Music generation timed out. No audio was applied; completed music remains available for reuse."));
+            else if (code == QStringLiteral("invalid_music_audio"))
+                reply(i18n("The generated audio failed duration or sound checks. No audio was applied. Completed provider output is kept for a local retry."));
+            else
+                reply(i18n("Music could not be prepared. Check ElevenLabs availability and credits, then try again. No audio was applied."));
+            return;
+        }
         if (code == QStringLiteral("missing_api_key"))
             reply(i18n("Gemini is not configured. Set GEMINI_API_KEY or the private Montaz assistant settings file."));
         else if (code == QStringLiteral("provider_auth") || code == QStringLiteral("invalid_settings"))
@@ -158,6 +202,18 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             reply(i18n("Planning could not finish. Check your source files and unlocked video tracks. No edit was applied."));
     });
     connect(m_worker, &WorkerClient::eventReceived, this, [this](const QJsonObject &event) {
+        if (event.value(QStringLiteral("type")) == QStringLiteral("music_progress")) {
+            const bool measurement = event.value(QStringLiteral("phase")) == QStringLiteral("measurement");
+            if (measurement) {
+                setTask(0, i18n("Done"));
+                setTask(1, i18n("Working"));
+                m_activeTask = 1;
+            }
+            m_status->setText(measurement                                      ? i18n("Checking music timing…")
+                              : event.value(QStringLiteral("cached")).toBool() ? i18n("Reusing prepared music…")
+                                                                               : i18n("Composing instrumental music…"));
+            return;
+        }
         if (event.value(QStringLiteral("type")) != QStringLiteral("progress")) return;
         if (event.value(QStringLiteral("phase")) == QStringLiteral("planning")) {
             if (m_activeTask == 0) {
@@ -233,7 +289,49 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                                                         index, QString::number(seconds, 'f', 1)));
         m_status->setText(i18n("Ready for review · video only"));
     });
+    connect(m_worker, &WorkerClient::soundtrackReady, this, [this](const QJsonObject &soundtrack) {
+        if (m_adapter->snapshot() != m_snapshot || !validateSoundtrack(m_snapshot, m_musicSpec, soundtrack).isEmpty()) {
+            clearProposal();
+            finishTasks(i18n("Outdated"));
+            reply(i18n("The sequence changed. Choose Add music to prepare a new soundtrack."));
+            return;
+        }
+        m_soundtrack = soundtrack;
+        const auto rate = m_snapshot.value(QStringLiteral("frame_rate")).toObject();
+        const double seconds = double(soundtrack.value(QStringLiteral("duration_frames")).toInt()) * rate.value(QStringLiteral("denominator")).toInt() /
+                               rate.value(QStringLiteral("numerator")).toInt();
+        m_previewCard->setTitle(i18n("Proposed music"));
+        m_preview->addItem(i18n("Instrumental · %1 seconds · ElevenLabs", QString::number(seconds, 'f', 1)));
+        m_preview->item(0)->setData(Qt::UserRole,
+                                    i18n("%1 energy accents detected. Cuts stay unchanged. The track has a gentle opening and ending. Listen before adding it.",
+                                         soundtrack.value(QStringLiteral("accents")).toArray().size()));
+        m_preview->setCurrentRow(0);
+        m_audioPreview->setSource(QUrl::fromLocalFile(soundtrack.value(QStringLiteral("path")).toString()));
+        m_listen->show();
+        m_apply->setText(i18n("Apply music"));
+        m_apply->setEnabled(true);
+        m_previewCard->show();
+        setTask(0, i18n("Done"));
+        setTask(1, i18n("Done"));
+        setTask(2, i18n("Ready"));
+        m_activeTask = 2;
+        reply(i18n("Your instrumental is ready. Apply adds it to a free audio track as one undoable edit. Existing audio stays in place."));
+    });
     connect(m_apply, &QPushButton::clicked, this, [this]() {
+        if (!m_soundtrack.isEmpty()) {
+            const auto soundtrack = m_soundtrack;
+            m_applying = true;
+            const auto result = m_adapter->applySoundtrack(m_snapshot, m_musicSpec, soundtrack);
+            m_applying = false;
+            m_worker->recordApply(soundtrack.value(QStringLiteral("request_id")).toString(), result);
+            clearProposal();
+            setTask(2, i18n("Done"));
+            setTask(3, result.isEmpty() ? i18n("Done") : i18n("Failed"));
+            m_activeTask = -1;
+            reply(result.isEmpty() ? i18n("Music added. One Undo removes the music and its imported asset.")
+                                   : i18n("Music could not be applied. Reopen the project if rollback failed; otherwise request fresh music."));
+            return;
+        }
         const auto proposal = m_proposal;
         if (proposal.isEmpty()) return;
         const auto current = m_adapter->snapshot();
@@ -251,7 +349,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     connect(m_adapter, &EditorAdapter::invalidated, this, [this]() {
         if (m_applying) return;
-        if (!m_proposal.isEmpty() || m_worker->busy()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || m_worker->busy()) {
             const bool busy = m_worker->busy();
             clearProposal();
             if (busy) m_worker->stop();
@@ -271,7 +369,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     contextTimer->start();
     const auto briefChanged = [this]() {
-        if (!m_proposal.isEmpty()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty()) {
             clearProposal();
             finishTasks(i18n("Outdated"));
             reply(i18n("Editing style or duration changed. Send a message to request a new plan."));
@@ -285,6 +383,10 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
 void Montaz::AssistantWidget::planEdit(const QString &message)
 {
     clearProposal();
+    m_musicMode = false;
+    const QStringList taskNames{i18n("Understand footage"), i18n("Arrange the story"), i18n("Review proposed shots"), i18n("Apply to timeline")};
+    for (int row = 0; row < 4; ++row)
+        m_tasks->topLevelItem(row)->setText(0, taskNames[row]);
     finishTasks(i18n("Superseded"));
     m_tasks->hide();
     m_chat->addMessage(i18n("You"), message);
@@ -321,7 +423,8 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
         setTask(row, i18n("Waiting"));
     m_activeTask = 0;
     setTask(0, i18n("Working"));
-    reply(i18n("I’ll analyze your footage, arrange a visual story, and show the proposed shots. Apply appends them as one undoable edit. Audio and captions "
+    reply(i18n("I’ll analyze your footage, arrange a visual story, and show the proposed shots. Apply appends them as one undoable edit. Use Add music after "
+               "applying. Captions "
                "are not added yet."));
     m_status->setText(i18n("Analyzing footage…"));
 }
@@ -361,8 +464,43 @@ void Montaz::AssistantWidget::finishTasks(const QString &status)
 void Montaz::AssistantWidget::clearProposal()
 {
     m_proposal = {};
+    m_soundtrack = {};
+    m_musicSpec = {};
+    m_listen->setChecked(false);
+    m_audioPreview->stop();
+    m_audioPreview->setSource({});
+    m_listen->hide();
+    m_previewCard->setTitle(i18n("Proposed shots"));
+    m_apply->setText(i18n("Apply edit"));
     m_apply->setEnabled(false);
     m_previewCard->hide();
     m_preview->clear();
     m_shotReason->clear();
+}
+
+void Montaz::AssistantWidget::composeMusic()
+{
+    clearProposal();
+    finishTasks(i18n("Superseded"));
+    m_musicMode = true;
+    m_musicSpec = m_adapter->musicRequest(m_recipe->currentData().toString(), m_brief);
+    m_snapshot = m_adapter->snapshot();
+    m_contextKey = m_adapter->contextKey();
+    if (m_musicSpec.isEmpty()) {
+        reply(i18n("Save the project, add 3–600 seconds of video to the timeline, and leave an unlocked audio track free before adding music."));
+        return;
+    }
+    if (!m_worker->start(m_snapshot, {{QStringLiteral("music"), m_musicSpec}})) {
+        reply(i18n("Music could not start. Check the active sequence and audio tracks."));
+        return;
+    }
+    const QStringList tasks{i18n("Compose instrumental"), i18n("Check music timing"), i18n("Listen and review"), i18n("Add to timeline")};
+    for (int row = 0; row < 4; ++row) {
+        m_tasks->topLevelItem(row)->setText(0, tasks[row]);
+        setTask(row, i18n("Waiting"));
+    }
+    m_activeTask = 0;
+    setTask(0, i18n("Working"));
+    m_tasks->show();
+    reply(i18n("I’ll compose an instrumental for the current video using this travel style. Stop cancels local processing; Apply is available after review."));
 }

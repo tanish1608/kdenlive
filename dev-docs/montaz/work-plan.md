@@ -74,15 +74,21 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    validated usable trims, micro-clip exclusion, feasible-duration estimates and
    shot explanations. Native Goa planning/apply/undo/save/reopen/export was checked;
    [quality review](quality-review.md) records findings and limitations.
-2. **Framing:** explicit project orientation and native framing proposals for mixed
-   portrait/landscape. Preserve manual reframing and test exact undo/redo.
-3. **Sound:** ElevenLabs music and occasional effects, measured beat/phrase timing,
+2. **Sound:** ElevenLabs music and occasional effects, measured beat/phrase timing,
    native audio insertion and gain/fades. Stop and errors must cleanly terminate.
-4. **Narration and captions:** separately cached speech evidence, per-project mode,
+   Instrumental generation, raw/prepared reuse, preview and native undoable
+   import/insertion are implemented. The Goa music export retains all 474 decoded
+   visual frames and measures -18.1 LUFS / -5.0 dBFS true peak. Effects, beat/phrase
+   alignment, ducking and native fade-effect proposals remain pending.
+3. **Narration and captions:** separately cached speech evidence, per-project mode,
    native subtitle styles. Silent footage must skip speech-only jobs. Test style
    switching without subtitle duplication or timing drift.
-5. **Quality review:** one bounded revision, honest unavailable/failed states,
+4. **Quality review:** one bounded revision, honest unavailable/failed states,
    mixed-media regressions and exported output review. Publication comes later.
+
+**Deferred by the user:** portrait framing. Later add explicit project orientation
+and native framing proposals for mixed portrait/landscape; preserve manual framing
+and test exact undo/redo. Do not let this block sound and editorial improvements.
 
 Native phone conversion also needed a fix: preserve recognized audio streams,
 exclude unsupported auxiliary audio, and reject nonzero encoder exits even when

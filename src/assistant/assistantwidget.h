@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QWidget>
 
+class QMediaPlayer;
 class QLabel;
 class QListWidget;
 class QPushButton;
@@ -25,6 +26,7 @@ public:
 
 private:
     void clearProposal();
+    void composeMusic();
     void planEdit(const QString &message);
     void reply(const QString &message);
     void resetConversation();
@@ -35,6 +37,12 @@ private:
     QLabel *m_status;
     QLabel *m_shotReason;
     QListWidget *m_preview;
+    QPushButton *m_music;
+    QPushButton *m_listen;
+    QMediaPlayer *m_audioPreview;
+    bool m_musicMode{false};
+    QJsonObject m_musicSpec;
+    QJsonObject m_soundtrack;
     QPushButton *m_plan;
     QPushButton *m_stop;
     QPushButton *m_apply;

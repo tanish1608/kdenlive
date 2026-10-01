@@ -4,7 +4,12 @@
 #include "doc/kdenlivedoc.h"
 #include "test_utils.hpp"
 
+#include <QCryptographicHash>
+#include <QDataStream>
+#include <QFile>
 #include <QJsonArray>
+#include <QTemporaryDir>
+#include <cmath>
 
 TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]")
 {
@@ -92,6 +97,116 @@ TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]
             REQUIRE(timeline->getTrackClipsCount(video) == 0);
             REQUIRE(stack->count() == 0);
         }
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+}
+
+TEST_CASE("Assistant imports music and places it with one native undo", "[Montaz]")
+{
+    QTemporaryDir temporary;
+    REQUIRE(temporary.isValid());
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto stack = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(stack);
+    document.setUrl(QUrl::fromLocalFile(temporary.filePath(QStringLiteral("travel.kdenlive"))));
+    pCore->projectManager()->testSetDocument(&document);
+    auto timeline = TimelineItemModel::construct(document.uuid(), stack);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int video = -1, audio = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, video));
+    REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    {
+        const auto fps = pCore->getProjectFpsInfo();
+        const int frames = int(std::ceil(4.0 * fps.first / fps.second));
+        const auto source = KdenliveTests::createProducer(pCore->getProjectProfile(), "red", bin, frames + 10);
+        int visual = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/%2").arg(source).arg(frames - 1), video, 20, visual));
+        stack->clear();
+        Montaz::EditorAdapter adapter;
+        const auto music = adapter.musicRequest(QStringLiteral("postcard"), QStringLiteral("Coastal travel"));
+        REQUIRE_FALSE(music.isEmpty());
+        REQUIRE(music.value(QStringLiteral("path")).toString().startsWith(temporary.filePath(QStringLiteral("travel.assets/music/"))));
+        REQUIRE(music.value(QStringLiteral("duration_frames")) == frames);
+        const auto context = adapter.snapshot();
+        // A local PCM WAV exercises actual MLT import, not a mock insertion callback.
+        QFile wave(music.value(QStringLiteral("path")).toString());
+        REQUIRE(wave.open(QIODevice::WriteOnly));
+        QDataStream writer(&wave);
+        writer.setByteOrder(QDataStream::LittleEndian);
+        const quint32 samples = 48000 * 5, bytes = samples * 4;
+        writer.writeRawData("RIFF", 4);
+        writer << quint32(36 + bytes);
+        writer.writeRawData("WAVEfmt ", 8);
+        writer << quint32(16) << quint16(1) << quint16(2) << quint32(48000) << quint32(192000) << quint16(4) << quint16(16);
+        writer.writeRawData("data", 4);
+        writer << bytes;
+        for (quint32 i = 0; i < samples; ++i) {
+            const auto value = qint16(4000 * std::sin(i * 2.0 * 3.141592653589793 * 440 / 48000));
+            writer << value << value;
+        }
+        wave.close();
+        REQUIRE(wave.open(QIODevice::ReadOnly));
+        const auto hash = QCryptographicHash::hash(wave.readAll(), QCryptographicHash::Sha256).toHex();
+        wave.close();
+        QJsonObject soundtrack{{QStringLiteral("request_id"), QStringLiteral("music-native")},
+                               {QStringLiteral("project_id"), context.value(QStringLiteral("project_id"))},
+                               {QStringLiteral("sequence_id"), context.value(QStringLiteral("sequence_id"))},
+                               {QStringLiteral("base_revision"), context.value(QStringLiteral("revision"))},
+                               {QStringLiteral("frame_rate"), context.value(QStringLiteral("frame_rate"))},
+                               {QStringLiteral("sha256"), QString::fromLatin1(hash)},
+                               {QStringLiteral("accents"), QJsonArray{30, 60}},
+                               {QStringLiteral("cached"), false}};
+        for (const auto &key : {QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames")})
+            soundtrack[key] = music.value(key);
+        const int before = bin->getAllClipIds().size();
+        SECTION("Apply, undo and redo retain visual edit and generated file")
+        {
+            REQUIRE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE(stack->count() == 1);
+            REQUIRE(bin->getAllClipIds().size() == before + 1);
+            REQUIRE(timeline->getTrackClipsCount(audio) == 1);
+            REQUIRE(timeline->getTrackClipsCount(video) == 1);
+            const int id = timeline->getClipByPosition(audio, 20);
+            REQUIRE(id >= 0);
+            REQUIRE(timeline->getClipPlaytime(id) == frames);
+            REQUIRE(timeline->getClipByPosition(audio, 20 + frames - 1) == id);
+            REQUIRE(timeline->checkConsistency());
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            stack->undo();
+            REQUIRE(timeline->getTrackClipsCount(audio) == 0);
+            REQUIRE(timeline->getTrackClipsCount(video) == 1);
+            REQUIRE(bin->getAllClipIds().size() == before);
+            REQUIRE(QFileInfo::exists(music.value(QStringLiteral("path")).toString()));
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            stack->redo();
+            REQUIRE(timeline->getTrackClipsCount(audio) == 1);
+            REQUIRE(bin->getAllClipIds().size() == before + 1);
+            REQUIRE(timeline->checkConsistency());
+        }
+        SECTION("Changed file is rejected before bin or timeline mutation")
+        {
+            REQUIRE(wave.open(QIODevice::WriteOnly | QIODevice::Append));
+            wave.write("changed");
+            wave.close();
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE(bin->getAllClipIds().size() == before);
+            REQUIRE(timeline->getTrackClipsCount(audio) == 0);
+            REQUIRE(stack->count() == 0);
+        }
+        SECTION("Locking and unlocking audio invalidates the pending review")
+        {
+            timeline->setTrackLockedState(audio, true);
+            timeline->setTrackLockedState(audio, false);
+            REQUIRE_FALSE(adapter.applySoundtrack(context, music, soundtrack).isEmpty());
+            REQUIRE(bin->getAllClipIds().size() == before);
+            REQUIRE(timeline->getTrackClipsCount(audio) == 0);
+        }
+        // Undo commands retain clip references; destroy them while the document lives.
+        stack->clear();
     }
     pCore->taskManager.slotCancelJobs();
     document.closing = true;

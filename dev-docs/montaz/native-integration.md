@@ -120,3 +120,20 @@ FPS; all six exported cut boundaries were inspected. See
 draft. An accessibility inspection immediately after closing Rendering reproduced
 the SDK/macOS AX hierarchy crash; reopening the saved project succeeded. This
 limitation is still unresolved and must not be counted as a clean UI test run.
+
+The instrumental music milestone passes **75 Python checks**, **24 Qt transport
+checks** and **7 chat checks** (including fixtures), plus native `assistanttest`.
+Synthetic audio checks exercise actual encoding, silence/shortfall rejection,
+one-frame MP3 padding, fades, raw/prepared reuse, missing credentials and Stop.
+Transport checks reject malformed/context-mismatched results and dirty exits;
+music Stop kills an uncooperative worker. Native tests import a real PCM WAV,
+place it at exact project frames, reject changed files/stale locks, and verify one
+Undo/Redo for both bin and timeline while preserving the visual edit and file.
+
+The live Goa project exercised ElevenLabs generation, Qt audio preview start/stop,
+native Apply/Undo/Redo, save/reopen with relative media references, and timeline
+playback with active audio meters. Native H.264/AAC
+export retains all 474 decoded video frames from the silent draft and measures
+-18.1 LUFS / -5.0 dBFS true peak. See [quality review](quality-review.md) for the
+real MP3 duration failure and local reuse correction. This does not verify musical
+cut alignment, ducking, sound effects or narration; those remain pending.

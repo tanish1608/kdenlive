@@ -22,6 +22,7 @@ public:
 
 Q_SIGNALS:
     void busyChanged(bool busy);
+    void soundtrackReady(const QJsonObject &soundtrack);
     void proposalReady(const QJsonObject &proposal);
     void eventReceived(const QJsonObject &event);
     void failed(const QString &code);
@@ -41,6 +42,10 @@ private:
     QJsonObject m_snapshot;
     QJsonObject m_proposal;
     QJsonObject m_review;
+    QJsonObject m_musicSpec;
+    QJsonObject m_soundtrack;
+    bool m_musicRequest{false};
+    int m_musicPhase{0};
     QString m_requestId;
     QString m_failure;
     QString m_logPath;

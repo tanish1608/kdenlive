@@ -41,9 +41,13 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Temporal analysis uses bounded silent video windows and validated usable trims.
   The preview explains shot choices and footage feasibility; logs retain numeric
   editorial metrics. A native Goa export was reviewed at all six cut boundaries.
-- Still pending: framing, additional native failure checks, narration, audio
-  pairing, ElevenLabs music/effects, subtitle styling, and deeper travel recipe
-  execution. The exported draft is silent with pillarboxed portrait footage;
+- ElevenLabs instrumental music follows the applied visual edit: private provider
+  settings, raw/prepared reuse, exact timeline duration, loudness/edge preparation,
+  Listen/Stop and one native undoable import/insertion. The Goa music export keeps
+  all 474 decoded visual frames unchanged and measures -18.1 LUFS / -5.0 dBFS.
+- Still pending: deferred portrait framing, additional native failure checks,
+  narration, audio pairing/ducking, effects, beat-aligned cuts, subtitle styling,
+  and deeper travel recipe execution. Portrait footage remains pillarboxed;
   passing integration checks does not make it a finished travel film.
 - See [native integration](native-integration.md) for exact verification limits.
 

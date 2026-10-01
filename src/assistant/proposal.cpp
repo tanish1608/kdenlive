@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #include "proposal.h"
 
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QMap>
 #include <QRegularExpression>
@@ -195,6 +196,74 @@ QString Montaz::validateProposal(const QJsonObject &snapshot, const QJsonObject 
             if (start < existing.second && existing.first < end) return QStringLiteral("overlap");
         }
         occupied[trackId].append({start, end});
+    }
+    return {};
+}
+
+QString Montaz::validateMusicRequest(const QJsonObject &snapshot, const QJsonObject &music)
+{
+    if (!validateSnapshot(snapshot).isEmpty() ||
+        !fields(music, {QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames"),
+                        QStringLiteral("recipe"), QStringLiteral("instruction")}) ||
+        !range(music, QStringLiteral("start_frame")) || !music.value(QStringLiteral("path")).isString() ||
+        music.value(QStringLiteral("path")).toString().size() > 4096 || !QFileInfo(music.value(QStringLiteral("path")).toString()).isAbsolute() ||
+        QFileInfo(music.value(QStringLiteral("path")).toString()).suffix() != QStringLiteral("wav") || !music.value(QStringLiteral("instruction")).isString() ||
+        music.value(QStringLiteral("instruction")).toString().size() > 2000 ||
+        !QStringList{QStringLiteral("postcard"), QStringLiteral("adventure"), QStringLiteral("diary")}.contains(
+            music.value(QStringLiteral("recipe")).toString()))
+        return invalid();
+    const auto rate = snapshot.value(QStringLiteral("frame_rate")).toObject();
+    const qint64 start = music.value(QStringLiteral("start_frame")).toInteger();
+    const qint64 length = music.value(QStringLiteral("duration_frames")).toInteger();
+    const qint64 numerator = rate.value(QStringLiteral("numerator")).toInteger(), denominator = rate.value(QStringLiteral("denominator")).toInteger();
+    if (length * denominator < 3 * numerator || length * denominator > 600 * numerator) return invalid();
+    QSet<QString> videoTracks;
+    bool target = false;
+    for (const auto value : snapshot.value(QStringLiteral("tracks")).toArray()) {
+        const auto track = value.toObject();
+        if (track.value(QStringLiteral("kind")) == QStringLiteral("video")) videoTracks.insert(track.value(QStringLiteral("track_id")).toString());
+        if (track.value(QStringLiteral("track_id")) == music.value(QStringLiteral("track_id")) &&
+            track.value(QStringLiteral("kind")) == QStringLiteral("audio") && !track.value(QStringLiteral("locked")).toBool())
+            target = true;
+    }
+    if (!target) return invalid();
+    qint64 first = 2147483647, last = 0;
+    for (const auto value : snapshot.value(QStringLiteral("occupied")).toArray()) {
+        const auto item = value.toObject();
+        const auto position = item.value(QStringLiteral("start_frame")).toInteger();
+        const auto end = position + item.value(QStringLiteral("duration_frames")).toInteger();
+        if (videoTracks.contains(item.value(QStringLiteral("track_id")).toString())) {
+            first = qMin(first, position);
+            last = qMax(last, end);
+        }
+        if (item.value(QStringLiteral("track_id")) == music.value(QStringLiteral("track_id")) && start < end && position < start + length) return invalid();
+    }
+    return first == start && last == start + length ? QString() : invalid();
+}
+
+QString Montaz::validateSoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack)
+{
+    if (!validateMusicRequest(snapshot, music).isEmpty() ||
+        !fields(soundtrack, {QStringLiteral("request_id"), QStringLiteral("project_id"), QStringLiteral("sequence_id"), QStringLiteral("base_revision"),
+                             QStringLiteral("frame_rate"), QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"),
+                             QStringLiteral("duration_frames"), QStringLiteral("sha256"), QStringLiteral("accents"), QStringLiteral("cached")}) ||
+        !identifier(soundtrack.value(QStringLiteral("request_id"))) ||
+        soundtrack.value(QStringLiteral("project_id")) != snapshot.value(QStringLiteral("project_id")) ||
+        soundtrack.value(QStringLiteral("sequence_id")) != snapshot.value(QStringLiteral("sequence_id")) ||
+        soundtrack.value(QStringLiteral("base_revision")) != snapshot.value(QStringLiteral("revision")) ||
+        soundtrack.value(QStringLiteral("frame_rate")) != snapshot.value(QStringLiteral("frame_rate")) ||
+        !QRegularExpression(QStringLiteral("^[a-f0-9]{64}$")).match(soundtrack.value(QStringLiteral("sha256")).toString()).hasMatch() ||
+        !soundtrack.value(QStringLiteral("cached")).isBool() || !soundtrack.value(QStringLiteral("accents")).isArray())
+        return invalid();
+    for (const auto &key : {QStringLiteral("path"), QStringLiteral("track_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames")})
+        if (soundtrack.value(key) != music.value(key)) return invalid();
+    const auto accents = soundtrack.value(QStringLiteral("accents")).toArray();
+    if (accents.size() > 128) return invalid();
+    qint64 previous = 0;
+    for (const auto value : accents) {
+        if (!integer(value, 1) || value.toInteger() <= previous || value.toInteger() >= soundtrack.value(QStringLiteral("duration_frames")).toInteger())
+            return invalid();
+        previous = value.toInteger();
     }
     return {};
 }

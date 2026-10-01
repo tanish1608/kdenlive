@@ -21,6 +21,8 @@ public:
     QString contextKey();
     QJsonObject snapshot();
     QJsonObject mediaSources(const QJsonObject &snapshot);
+    QJsonObject musicRequest(const QString &recipe, const QString &instruction);
+    QString applySoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack);
     QString apply(const QJsonObject &proposal);
 
 Q_SIGNALS:

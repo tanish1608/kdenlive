@@ -13,6 +13,9 @@
 #include "timeline2/model/timelineitemmodel.hpp"
 
 #include <KLocalizedString>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QThread>
@@ -173,4 +176,75 @@ QString Montaz::EditorAdapter::apply(const QJsonObject &proposal)
     if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
     invalidate();
     return result;
+}
+
+QJsonObject Montaz::EditorAdapter::musicRequest(const QString &recipe, const QString &instruction)
+{
+    const auto current = snapshot();
+    if (current.isEmpty() || !m_document->url().isLocalFile()) return {};
+    QSet<QString> videos;
+    for (const auto value : current.value(QStringLiteral("tracks")).toArray()) {
+        const auto track = value.toObject();
+        if (track.value(QStringLiteral("kind")) == QStringLiteral("video")) videos.insert(track.value(QStringLiteral("track_id")).toString());
+    }
+    int start = std::numeric_limits<int>::max(), end = 0;
+    for (const auto value : current.value(QStringLiteral("occupied")).toArray()) {
+        const auto item = value.toObject();
+        if (!videos.contains(item.value(QStringLiteral("track_id")).toString())) continue;
+        start = std::min(start, item.value(QStringLiteral("start_frame")).toInt());
+        end = std::max(end, item.value(QStringLiteral("start_frame")).toInt() + item.value(QStringLiteral("duration_frames")).toInt());
+    }
+    if (end <= start) return {};
+    // Generated media is durable project content, not an evictable analysis cache.
+    const QFileInfo project(m_document->url().toLocalFile());
+    const QString directory = project.absolutePath() + QLatin1Char('/') + project.completeBaseName() + QStringLiteral(".assets/music");
+    if (!QDir().mkpath(directory)) return {};
+    const QString path = directory + QLatin1Char('/') + QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".wav");
+    QJsonObject music{{QStringLiteral("path"), path},
+                      {QStringLiteral("start_frame"), start},
+                      {QStringLiteral("duration_frames"), end - start},
+                      {QStringLiteral("recipe"), recipe},
+                      {QStringLiteral("instruction"), instruction}};
+    for (const auto value : current.value(QStringLiteral("tracks")).toArray()) {
+        music[QStringLiteral("track_id")] = value.toObject().value(QStringLiteral("track_id"));
+        if (validateMusicRequest(current, music).isEmpty()) return music;
+    }
+    return {};
+}
+
+QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const QJsonObject &music, const QJsonObject &soundtrack)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot() != context || !validateSoundtrack(context, music, soundtrack).isEmpty()) return QStringLiteral("invalid_soundtrack");
+    const auto request = soundtrack.value(QStringLiteral("request_id")).toString();
+    if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
+    QFile file(music.value(QStringLiteral("path")).toString());
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024) return QStringLiteral("invalid_soundtrack");
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!hash.addData(&file) || QString::fromLatin1(hash.result().toHex()) != soundtrack.value(QStringLiteral("sha256")).toString())
+        return QStringLiteral("invalid_soundtrack");
+    const auto timeline = m_timeline.lock();
+    auto producer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), "avformat", file.fileName().toUtf8().constData());
+    const int length = music.value(QStringLiteral("duration_frames")).toInt();
+    if (!timeline || !producer->is_valid() || producer->get_int("audio_index") < 0 || producer->get_int("video_index") >= 0 ||
+        producer->get_playtime() < length)
+        return QStringLiteral("invalid_soundtrack");
+    producer->set("kdenlive:clipname", i18n("Assistant music").toUtf8().constData());
+    UndoFunction undo = []() { return true; }, redo = []() { return true; };
+    QString binId;
+    const auto bin = pCore->projectItemModel();
+    if (!bin->requestAddBinClip(binId, producer, QStringLiteral("-1"), undo, redo)) return QStringLiteral("music_import_failed");
+    int clipId = -1;
+    const auto source = QStringLiteral("A%1/0/%2").arg(binId).arg(length - 1);
+    if (!timeline->requestClipInsertion(source, music.value(QStringLiteral("track_id")).toString().toInt(), music.value(QStringLiteral("start_frame")).toInt(),
+                                        clipId, false, true, false, undo, redo, {}, 1) ||
+        clipId < 0) {
+        const bool rolledBack = undo();
+        if (!rolledBack) m_applyHealthy = false;
+        return rolledBack ? QStringLiteral("music_insert_failed") : QStringLiteral("rollback_failed");
+    }
+    pCore->pushUndo(undo, redo, i18n("Add assistant music"));
+    m_appliedRequests.insert(request);
+    invalidate();
+    return {};
 }

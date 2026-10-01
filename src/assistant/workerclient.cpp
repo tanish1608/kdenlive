@@ -58,6 +58,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_logPath = !cache.isEmpty() && QDir().mkpath(logDirectory) ? logDirectory + QLatin1Char('/') + m_requestId + QStringLiteral(".jsonl") : QString();
     m_proposal = {};
     m_review = {};
+    m_soundtrack = {};
     m_buffer.clear();
     m_sequence = 0;
     m_outputBytes = 0;
@@ -65,14 +66,22 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_ready = false;
     m_completed = false;
     m_cancelled = false;
-    m_mediaRequest = !context.isEmpty();
+    m_musicRequest = context.contains(QStringLiteral("music"));
+    m_mediaRequest = !context.isEmpty() && !m_musicRequest;
+    m_musicPhase = 0;
+    m_musicSpec = context.value(QStringLiteral("music")).toObject();
     m_planningProgressReceived = false;
     m_progressCompleted = m_progressCached = 0;
     QJsonObject request{{QStringLiteral("version"), 1},
-                        {QStringLiteral("type"), m_mediaRequest ? QStringLiteral("plan_media") : QStringLiteral("plan_demo")},
+                        {QStringLiteral("type"), m_musicRequest   ? QStringLiteral("compose_music")
+                                                 : m_mediaRequest ? QStringLiteral("plan_media")
+                                                                  : QStringLiteral("plan_demo")},
                         {QStringLiteral("request_id"), m_requestId},
                         {QStringLiteral("snapshot"), snapshot}};
-    if (m_mediaRequest) {
+    if (m_musicRequest) {
+        if (context.size() != 1 || !validateMusicRequest(snapshot, m_musicSpec).isEmpty()) return false;
+        request.insert(QStringLiteral("music"), m_musicSpec);
+    } else if (m_mediaRequest) {
         if (context.size() != 2 || !context.value(QStringLiteral("sources")).isObject() || !context.value(QStringLiteral("brief")).isObject()) return false;
         request.insert(QStringLiteral("sources"), context.value(QStringLiteral("sources")));
         request.insert(QStringLiteral("brief"), context.value(QStringLiteral("brief")));
@@ -91,7 +100,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_busy = true;
     record(QStringLiteral("started"), {{QStringLiteral("assets"), snapshot.value(QStringLiteral("assets")).toArray().size()},
                                        {QStringLiteral("revision"), snapshot.value(QStringLiteral("revision"))}});
-    m_deadline.start(m_mediaRequest ? 180000 : m_defaultDeadline);
+    m_deadline.start(m_mediaRequest || m_musicRequest ? 180000 : m_defaultDeadline);
     Q_EMIT busyChanged(true);
     m_process.start();
     m_process.write(line);
@@ -105,6 +114,7 @@ void Montaz::WorkerClient::stop()
     m_cancelled = true;
     m_proposal = {};
     m_review = {};
+    m_soundtrack = {};
     m_deadline.stop();
     m_process.terminate();
     m_killTimer.start();
@@ -116,6 +126,7 @@ void Montaz::WorkerClient::abort(const QString &code)
     m_failure = code;
     m_proposal = {};
     m_review = {};
+    m_soundtrack = {};
     m_deadline.stop();
     m_process.terminate();
     m_killTimer.start();
@@ -152,16 +163,21 @@ void Montaz::WorkerClient::readOutput()
                    message.value(QStringLiteral("sequence")) == m_sequence + 1) {
             ++m_sequence;
             const auto status = message.value(QStringLiteral("status")).toString();
-            // This diagnostic worker has exactly one planner stage and four events.
+            // Each bounded worker request has one stage and four lifecycle events.
             const QStringList states{QStringLiteral("running"), QStringLiteral("running"), QStringLiteral("completed"), QStringLiteral("completed")};
             const bool runEvent = m_sequence == 1 || m_sequence == 4;
             if (message.size() != 7 || m_sequence > 4 || status != states[m_sequence - 1] ||
-                (runEvent ? !message.value(QStringLiteral("stage")).isNull() : message.value(QStringLiteral("stage")) != QStringLiteral("planner")) ||
+                (runEvent ? !message.value(QStringLiteral("stage")).isNull()
+                          : message.value(QStringLiteral("stage")) != (m_musicRequest ? QStringLiteral("music") : QStringLiteral("planner"))) ||
                 !message.value(QStringLiteral("reason")).isString()) {
                 abort(QStringLiteral("invalid_worker_event"));
                 return;
             }
             if (m_mediaRequest && m_sequence == 4 && !m_planningProgressReceived) {
+                abort(QStringLiteral("invalid_worker_event"));
+                return;
+            }
+            if (m_musicRequest && m_sequence == 4 && m_musicPhase != 2) {
                 abort(QStringLiteral("invalid_worker_event"));
                 return;
             }
@@ -197,9 +213,32 @@ void Montaz::WorkerClient::readOutput()
                                                 {QStringLiteral("cached"), cached},
                                                 {QStringLiteral("total"), total}});
             Q_EMIT eventReceived(message);
+        } else if (type == QStringLiteral("music_progress") && m_musicRequest && m_ready && m_sequence == 2 && !m_completed) {
+            const auto phase = message.value(QStringLiteral("phase")).toString();
+            const auto model = message.value(QStringLiteral("model")).toString();
+            if (message.size() != 5 || !message.value(QStringLiteral("cached")).isBool() ||
+                !QStringList{QStringLiteral("music_v1"), QStringLiteral("music_v2"), QStringLiteral("music_v2_5")}.contains(model) ||
+                phase != (m_musicPhase == 0 ? QStringLiteral("generation") : QStringLiteral("measurement")) || m_musicPhase > 1) {
+                abort(QStringLiteral("invalid_worker_progress"));
+                return;
+            }
+            ++m_musicPhase;
+            record(QStringLiteral("progress"), {{QStringLiteral("provider"), QStringLiteral("elevenlabs")},
+                                                {QStringLiteral("model"), model},
+                                                {QStringLiteral("phase"), phase},
+                                                {QStringLiteral("cached"), message.value(QStringLiteral("cached"))}});
+            Q_EMIT eventReceived(message);
         } else if (type == QStringLiteral("error") && m_ready && !m_completed && message.size() == 3) {
             const auto code = message.value(QStringLiteral("code")).toString();
-            const QStringList allowed{QStringLiteral("missing_api_key"),
+            const QStringList allowed{QStringLiteral("missing_music_key"),
+                                      QStringLiteral("music_auth"),
+                                      QStringLiteral("music_unavailable"),
+                                      QStringLiteral("music_timeout"),
+                                      QStringLiteral("music_request_rejected"),
+                                      QStringLiteral("invalid_music_audio"),
+                                      QStringLiteral("invalid_music_request"),
+                                      QStringLiteral("no_audio_track"),
+                                      QStringLiteral("missing_api_key"),
                                       QStringLiteral("invalid_settings"),
                                       QStringLiteral("invalid_brief"),
                                       QStringLiteral("provider_auth"),
@@ -218,7 +257,17 @@ void Montaz::WorkerClient::readOutput()
                                       QStringLiteral("cancelled")};
             abort(allowed.contains(code) ? code : QStringLiteral("worker_rejected_request"));
             return;
-        } else if (type == QStringLiteral("proposal") && m_ready && m_completed && m_proposal.isEmpty() &&
+        } else if (type == QStringLiteral("soundtrack") && m_musicRequest && m_ready && m_completed && m_soundtrack.isEmpty() && message.size() == 3) {
+            const auto soundtrack = message.value(QStringLiteral("soundtrack")).toObject();
+            if (soundtrack.value(QStringLiteral("request_id")) != m_requestId || !validateSoundtrack(m_snapshot, m_musicSpec, soundtrack).isEmpty()) {
+                abort(QStringLiteral("invalid_soundtrack"));
+                return;
+            }
+            m_soundtrack = soundtrack;
+            record(QStringLiteral("music_review"), {{QStringLiteral("frames"), soundtrack.value(QStringLiteral("duration_frames"))},
+                                                    {QStringLiteral("accents"), soundtrack.value(QStringLiteral("accents")).toArray().size()},
+                                                    {QStringLiteral("cached"), soundtrack.value(QStringLiteral("cached"))}});
+        } else if (type == QStringLiteral("proposal") && !m_musicRequest && m_ready && m_completed && m_proposal.isEmpty() &&
                    message.size() == (message.contains(QStringLiteral("review")) ? 4 : 3) && message.value(QStringLiteral("proposal")).isObject()) {
             const auto proposal = message.value(QStringLiteral("proposal")).toObject();
             if (proposal.value(QStringLiteral("request_id")) != m_requestId || !validateProposal(m_snapshot, proposal).isEmpty()) {
@@ -263,14 +312,18 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
     const bool cancelled = m_cancelled;
     QString failure = cancelled ? QString() : m_failure;
     const auto proposal = m_proposal;
-    if (!cancelled && failure.isEmpty() && (exitCode != 0 || exitStatus != QProcess::NormalExit || proposal.isEmpty() || !m_buffer.isEmpty()))
+    const auto soundtrack = m_soundtrack;
+    if (!cancelled && failure.isEmpty() &&
+        (exitCode != 0 || exitStatus != QProcess::NormalExit || (m_musicRequest ? soundtrack.isEmpty() : proposal.isEmpty()) || !m_buffer.isEmpty()))
         failure = QStringLiteral("worker_incomplete");
     m_busy = false;
     m_proposal = {};
+    m_soundtrack = {};
     if (cancelled || !failure.isEmpty()) m_review = {};
     m_buffer.clear();
     record(cancelled            ? QStringLiteral("cancelled")
            : !failure.isEmpty() ? QStringLiteral("failed")
+           : m_musicRequest     ? QStringLiteral("soundtrack_ready")
                                 : QStringLiteral("proposal_ready"),
            {{QStringLiteral("code"), failure}});
     Q_EMIT busyChanged(false);
@@ -278,6 +331,8 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
         Q_EMIT stopped();
     else if (!failure.isEmpty())
         Q_EMIT failed(failure);
+    else if (m_musicRequest)
+        Q_EMIT soundtrackReady(soundtrack);
     else
         Q_EMIT proposalReady(proposal);
 }

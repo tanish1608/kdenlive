@@ -52,6 +52,28 @@ changes aspect ratio abruptly. Camera movement and the final obstructed archway
 shot still need editorial judgment. The draft is silent and shorter than even
 its feasible maximum. More duration alone would not make it better.
 
-Next gates are explicit orientation/native framing, music and measured cut timing,
-then narration/caption modes and one bounded review revision. Do not describe this
+Next gates are music and measured cut timing, narration/caption modes and one
+bounded review revision. Portrait framing is deferred by the user. Do not describe this
 checkpoint as a finished film or as proof of uniformly improved editorial quality.
+
+## Instrumental checkpoint
+
+The separate `goa-music-review.kdenlive` keeps the seven-shot visual edit unchanged
+and adds ElevenLabs instrumental music through native import/insertion. Preview
+starts/stops; one Undo removes both the clip and imported asset, and Redo restores
+them. Reopening restores the imported music and its waveform; native timeline
+playback advances with active audio meters. Saving uses a relative audio reference to `goa-music-review.assets/music/`
+beside the project. Retain that folder with the project.
+
+The first generation failed a strict duration check. A diagnostic generation
+revealed 15.792 seconds of MP3 against a 15.8158-second video span. Raw responses
+now persist before local preparation. Local reuse padded only the final codec
+shortfall (less than one project frame), produced 759,158 samples at 48 kHz, and
+detected 27 energy accents. These are not verified beats; no cuts moved.
+
+Native H.264/AAC export `~/Movies/goa-music-review.mp4` has exactly **474 video
+frames**, 1920×1080 at 30000/1001 FPS. Audio container duration is 15.829 seconds
+because of AAC framing. All 474 decoded video frames match the prior silent
+export exactly. Exported audio measures **-18.1 LUFS** integrated and **-5.0 dBFS**
+true peak. This is a soundtrack integration check; portrait framing,
+automatic musical cut timing, environmental audio/ducking and effects remain open.
