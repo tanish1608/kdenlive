@@ -343,16 +343,20 @@ QJsonObject Montaz::EditorAdapter::timingRequest()
     for (const auto value : current.value(QStringLiteral("occupied")).toArray()) {
         const auto item = value.toObject();
         const int id = item.value(QStringLiteral("instance_id")).toString().toInt();
-        if (timeline->isInGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 || timeline->getClipSpeed(id) != 1.0 ||
+        if (timeline->hasPersistentGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 || timeline->getClipSpeed(id) != 1.0 ||
             timeline->getClipEffectStackModel(id)->rowCount() > 0)
             return {};
         const auto binId = timeline->getClipBinId(id);
         const auto asset = pCore->projectItemModel()->getClipByBinID(binId);
-        if (!asset) return {};
+        const int track = timeline->getClipTrackId(id);
+        if (!asset || asset->getEffectStack()->rowCount() || timeline->getTrackEffectStackModel(track)->rowCount() ||
+            (timeline->getTrackProperty(track, QStringLiteral("hide")).toInt() & (timeline->isAudioTrack(track) ? 2 : 1)))
+            return {};
         if (timeline->isAudioTrack(item.value(QStringLiteral("track_id")).toString().toInt())) {
             const QFileInfo path(asset->clipUrl());
             // Accept the role marker or legacy assistant music assets created before it.
-            if (!music.isEmpty() || timeline->getClipIn(id) != 0 || path.suffix() != QStringLiteral("wav") ||
+            if (!music.isEmpty() || timeline->getClipState(id).first != PlaylistState::AudioOnly || timeline->getClipIn(id) != 0 ||
+                path.suffix() != QStringLiteral("wav") ||
                 (asset->getProducerProperty(QStringLiteral("kdenlive:montaz_role")) != QStringLiteral("music") &&
                  !path.absolutePath().endsWith(QStringLiteral(".assets/music"))))
                 return {};
@@ -418,7 +422,7 @@ QString Montaz::EditorAdapter::applyTiming(const QJsonObject &context, const QJs
             return timeline->requestItemResize(id, length, true, true, undo, redo) && length == requested &&
                    timeline->getClipIn(id) == step.value(QStringLiteral("in_frame")).toInt();
         },
-        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Align cuts to music accents")); });
+        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Align cuts to music")); });
     if (result.isEmpty()) m_appliedRequests.insert(request);
     if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
     invalidate();

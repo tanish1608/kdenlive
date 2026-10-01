@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from montaz_assistant.contracts import Asset, FrameRate, OccupiedRange, Snapshot, Track
 from montaz_assistant.gemini import AssistantError
@@ -58,29 +59,45 @@ class TimingTests(unittest.TestCase):
     def test_small_accent_shifts_preserve_order_sources_and_total(self):
         result = refine(self.snapshot, "request", self.spec, [54, 94])
         self.assertEqual([x["start_frame"] for x in result["operations"]], [0, 54, 94])
-        self.assertEqual([x["duration_frames"] for x in result["operations"]], [54, 40, 56])
+        self.assertEqual(
+            [x["duration_frames"] for x in result["operations"]], [54, 40, 56]
+        )
         self.assertEqual(sum(x["duration_frames"] for x in result["operations"]), 150)
         self.assertEqual([x["in_frame"] for x in result["operations"]], [0, 0, 0])
         self.assertEqual(result["protocol_version"], 2)
         self.assertEqual(result["base_revision"], 7)
 
     def test_global_choice_respects_neighbor_source_handles(self):
-        snapshot = replace(self.snapshot, assets=(Asset("0", 52), Asset("1", 55), Asset("2", 60)))
+        snapshot = replace(
+            self.snapshot, assets=(Asset("0", 52), Asset("1", 55), Asset("2", 60))
+        )
         result = refine(snapshot, "request", self.spec, [46, 54, 94])
         self.assertEqual([x["start_frame"] for x in result["operations"]], [0, 46, 94])
 
-    def test_no_handles_no_nearby_accents_and_already_aligned_are_terminal_no_changes(self):
+    def test_no_handles_no_nearby_accents_and_already_aligned_are_terminal_no_changes(
+        self,
+    ):
         for snapshot, accents in (
-            (replace(self.snapshot, assets=tuple(Asset(str(i), 50) for i in range(3))), [54, 94]),
+            (
+                replace(
+                    self.snapshot, assets=tuple(Asset(str(i), 50) for i in range(3))
+                ),
+                [54, 94],
+            ),
             (self.snapshot, [30, 120]),
             (self.snapshot, [50, 100]),
             (self.snapshot, []),
         ):
-            with self.subTest(accents=accents), self.assertRaises(AssistantError) as caught:
+            with (
+                self.subTest(accents=accents),
+                self.assertRaises(AssistantError) as caught,
+            ):
                 refine(snapshot, "request", self.spec, accents)
             self.assertEqual(caught.exception.code, "no_alignment_needed")
 
-    def test_equal_distance_tie_is_deterministic_and_invariant_to_nonmatching_accents(self):
+    def test_equal_distance_tie_is_deterministic_and_invariant_to_nonmatching_accents(
+        self,
+    ):
         first = refine(self.snapshot, "request", self.spec, [46, 54])
         second = refine(self.snapshot, "request", self.spec, [20, 46, 54, 130])
         self.assertEqual(first["operations"], second["operations"])
@@ -98,10 +115,13 @@ class TimingTests(unittest.TestCase):
             with self.assertRaises((AssistantError, ValueError)):
                 timing_spec(self.snapshot, spec)
         for snapshot in (
-            replace(self.snapshot, tracks=(Track("1", "video", True), Track("2", "audio"))),
+            replace(
+                self.snapshot, tracks=(Track("1", "video", True), Track("2", "audio"))
+            ),
             replace(
                 self.snapshot,
-                occupied=self.snapshot.occupied + (OccupiedRange("speech", "2", 150, 10),),
+                occupied=self.snapshot.occupied
+                + (OccupiedRange("speech", "2", 150, 10),),
             ),
         ):
             with self.assertRaises(AssistantError):
@@ -127,7 +147,42 @@ class TimingTests(unittest.TestCase):
             refine_timing(self.snapshot, "request", self.spec, media)
         self.assertEqual(caught.exception.code, "cancelled")
 
-    @unittest.skipUnless(shutil.which(os.environ.get("MONTAZ_FFMPEG", "ffmpeg")), "FFmpeg required")
+    def test_music_changed_during_analysis_is_rejected_before_proposal(self):
+        def change(*args):
+            self.music.write_bytes(b"changed during decode")
+            return dict(
+                mode="beats",
+                beats=[13, 25, 38, 50, 63, 75],
+                bpm=120,
+                periodicity=1,
+                support=1,
+                reason="none",
+                cached=False,
+                version="periodic-onsets-1",
+            )
+
+        with patch("montaz_assistant.timing.analyze", side_effect=change):
+            with self.assertRaises(AssistantError) as caught:
+                refine_timing(self.snapshot, "request", self.spec, MediaTools())
+        self.assertEqual(caught.exception.code, "media_changed")
+
+    def test_relative_anchors_translate_to_nonzero_timeline_start(self):
+        clips = [dict(c, start_frame=c["start_frame"] + 20) for c in self.spec["clips"]]
+        snapshot = replace(
+            self.snapshot,
+            occupied=tuple(
+                replace(o, start_frame=o.start_frame + 20)
+                for o in self.snapshot.occupied
+            ),
+        )
+        result = refine(snapshot, "request", dict(self.spec, clips=clips), [54, 94])
+        self.assertEqual(
+            [o["start_frame"] for o in result["operations"]], [20, 74, 114]
+        )
+
+    @unittest.skipUnless(
+        shutil.which(os.environ.get("MONTAZ_FFMPEG", "ffmpeg")), "FFmpeg required"
+    )
     def test_actual_worker_measures_existing_music_without_credentials_or_network(self):
         snapshot = replace(
             self.snapshot,
@@ -157,6 +212,7 @@ class TimingTests(unittest.TestCase):
                 GEMINI_API_KEY="",
                 ELEVENLABS_API_KEY="",
                 MONTAZ_ASSISTANT_CONFIG=str(Path(self.temp.name) / "missing.json"),
+                MONTAZ_ANALYSIS_CACHE=str(Path(self.temp.name) / "cache"),
             ),
             capture_output=True,
             timeout=8,
@@ -164,7 +220,14 @@ class TimingTests(unittest.TestCase):
         messages = [decode(line) for line in result.stdout.splitlines()]
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(messages[-1]["type"], "timing")
-        self.assertEqual([x["sequence"] for x in messages if x["type"] == "event"], [1, 2, 3, 4])
+        proposal = messages[-1]["proposal"]
+        self.assertEqual(proposal["protocol_version"], 4)
+        self.assertEqual(proposal["analysis"]["mode"], "beats")
+        self.assertEqual(proposal["analysis"]["bpm"], 120)
+        self.assertEqual(proposal["operations"][1]["start_frame"], 50)
+        self.assertEqual(
+            [x["sequence"] for x in messages if x["type"] == "event"], [1, 2, 3, 4]
+        )
         self.assertNotIn(str(self.music).encode(), result.stdout)
 
 

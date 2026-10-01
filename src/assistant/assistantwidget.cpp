@@ -79,7 +79,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     sounds->addAction(i18n("Suggest sounds"), this, &AssistantWidget::suggestSounds);
     m_effect->setMenu(sounds);
     m_align = new QPushButton(i18n("Align cuts"), this);
-    m_align->setToolTip(i18n("Review small cut shifts to accents in your existing assistant music."));
+    m_align->setToolTip(i18n("Review small cut shifts to estimated beats in your existing assistant music, with energy accents as a fallback."));
     soundActions->addWidget(m_align);
     layout->addLayout(soundActions);
     m_captions = new QPushButton(i18n("Captions"), this);
@@ -569,6 +569,12 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             return;
         }
         m_timingProposal = proposal;
+        const auto analysis = proposal.value(QStringLiteral("analysis")).toObject();
+        const bool beats = analysis.value(QStringLiteral("mode")) == QStringLiteral("beats");
+        const auto explanation =
+            beats ? i18n("Moves to an observed onset supporting a steady rhythm at approximately %1 BPM. This does not identify downbeats or musical phrases.",
+                         QString::number(analysis.value(QStringLiteral("bpm")).toDouble(), 'f', 1))
+                  : i18n("Moves to a measured energy accent. A steady beat could not be established; listen before applying.");
         const auto rate = m_snapshot.value(QStringLiteral("frame_rate")).toObject();
         const double unit = double(rate.value(QStringLiteral("denominator")).toInt()) / rate.value(QStringLiteral("numerator")).toInt();
         const auto originals = m_timingSpec.value(QStringLiteral("clips")).toArray(), operations = proposal.value(QStringLiteral("operations")).toArray();
@@ -579,8 +585,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             m_preview->addItem(
                 i18n("Cut %1 · %2 → %3 s (%4 frames)", i, QString::number(before * unit, 'f', 2), QString::number(after * unit, 'f', 2), after - before));
             m_preview->item(m_preview->count() - 1)
-                ->setData(Qt::UserRole, i18n("Moves to a measured energy accent. Adjacent shot lengths change; footage is not stretched. This is not a "
-                                             "verified beat or phrase boundary."));
+                ->setData(Qt::UserRole, QString(explanation + QLatin1Char(' ') + i18n("Adjacent shot lengths change; footage is not stretched.")));
         }
         m_preview->setCurrentRow(0);
         m_previewCard->setTitle(i18n("Proposed cut timing"));
@@ -591,6 +596,10 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         setTask(1, i18n("Done"));
         setTask(2, i18n("Ready"));
         m_activeTask = 2;
+        reply(beats ? i18n("Estimated a steady rhythm at %1 BPM%2. Listen to the proposed cuts before applying.",
+                           QString::number(analysis.value(QStringLiteral("bpm")).toDouble(), 'f', 1),
+                           analysis.value(QStringLiteral("cached")).toBool() ? i18n(" using cached analysis") : QString())
+                    : i18n("No steady rhythm was established. These suggestions use energy accents; listen before applying."));
         reply(i18np("One cut shift is ready for review. Apply changes the existing clips in one undoable edit and keeps the music and total length.",
                     "%1 cut shifts are ready for review. Apply changes the existing clips in one undoable edit and keeps the music and total length.",
                     m_preview->count()));
@@ -913,7 +922,7 @@ void Montaz::AssistantWidget::refineTiming()
         reply(i18n("Timing refinement could not start. Check the active sequence."));
         return;
     }
-    const QStringList tasks{i18n("Measure music accents"), i18n("Validate cut shifts"), i18n("Review timing changes"), i18n("Apply refinement")};
+    const QStringList tasks{i18n("Analyze music rhythm"), i18n("Validate cut shifts"), i18n("Review timing changes"), i18n("Apply refinement")};
     for (int row = 0; row < 4; ++row) {
         m_tasks->topLevelItem(row)->setText(0, tasks[row]);
         setTask(row, i18n("Waiting"));

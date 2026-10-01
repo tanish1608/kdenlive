@@ -83,7 +83,7 @@ footage paths/descriptions/briefs/shot reasons and provider stderr are excluded.
 
 Gemini uses the official [GenerateContent REST API](https://ai.google.dev/api/generate-content)
 with JSON output, followed by strict local/native validation. Narration, source
-audio pairing and beat-based editing remain pending. Reviewed speech captions and
+audio pairing and phrase-aware editing remain pending. Reviewed speech captions and
 native subtitle presets are described below.
 
 ## One draft quality review
@@ -188,25 +188,34 @@ be assistant music/effects, and each cue needs free unlocked audio space.
 
 ## Local cut timing
 
-With assistant music on the timeline, **Align cuts** proposes small changes to
-existing cut points using measured energy accents. It runs locally and makes no
-provider calls. Review the before/after cut times, then **Apply timing**. One
+With assistant music on the timeline, **Align cuts** estimates a steady rhythm
+from recurring onsets across three frequency bands. Supported attacks become
+proposed cut anchors; ambiguous music falls back to explicitly labelled energy
+accents. It runs locally and makes no provider calls. Review the before/after cut
+times and listen in the native monitor, then **Apply timing**. One
 native Undo restores the original cuts; music, shot order, source in-points and
 the overall video span stay unchanged. Native clip IDs and bin assets are retained.
 
 The first version requires one contiguous video track, at least two shots, one
 assistant instrumental covering the edit, and shots lasting at least one second.
-Grouped clips, other audio, effects, speed changes, transitions and subtitles are
-ineligible. Each internal boundary can move at most one quarter second, rounded
+Permanent groups, other audio, effects, muted/hidden tracks, speed changes,
+transitions and subtitles are ineligible; selecting several clips is supported.
+Each internal boundary can move at most one quarter second, rounded
 down to project frames (minimum one frame). Source length limits and neighboring
 shot durations can prevent a shift. No useful change is a terminal outcome.
-Accents are not verified beats or musical phrases; review the result in playback.
+The beat estimate is conservative and does not identify downbeats or musical
+phrases. It can confuse subdivisions or decline music with variable tempo.
+Analysis is cached by audio content, FPS, duration and algorithm version.
 
-`refine_timing` returns a separate protocol-v2 retiming proposal. Both validators
+`refine_timing` returns a separate protocol-v4 retiming proposal with strict
+analysis measurements and up to 2,048 observed beat anchors. Legacy protocol-v2
+accent proposals remain valid. Both validators
 enforce the editor-issued clip identities, source starts, frame limits, matching
 music checksum and unchanged total span. Apply rechecks native eligibility and
 the audio checksum, then accumulates native resize/move undo functions in one
 batch. Only affected clips are touched; a failed step rolls back the batch.
+See [music timing](../dev-docs/montaz/music-timing.md) for reproducible native
+export checks and remaining musical-quality limits.
 
 Compile and exercise the actual Qt process transport, native validator, and
 batch rollback logic using an installed Qt development environment:
@@ -302,4 +311,4 @@ python3 assistant/tools/check_match_quality.py \
 This generates moving textured objects outside Git and exercises real tracking,
 source-frame offsets, native application, Undo/Redo, effect serialization and
 export. General portrait framing, manual anchor correction, multi-pair selection,
-beat/phrase detection, whip pans, object wipes and speed ramps remain future work.
+phrase/downbeat detection, whip pans, object wipes and speed ramps remain future work.

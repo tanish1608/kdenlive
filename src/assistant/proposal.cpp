@@ -479,27 +479,55 @@ QString Montaz::validateTimingRequest(const QJsonObject &snapshot, const QJsonOb
 
 QString Montaz::validateTimingProposal(const QJsonObject &snapshot, const QJsonObject &timing, const QJsonObject &proposal)
 {
-    if (!validateTimingRequest(snapshot, timing).isEmpty() ||
-        !fields(proposal, {QStringLiteral("request_id"), QStringLiteral("project_id"), QStringLiteral("sequence_id"), QStringLiteral("base_revision"),
-                           QStringLiteral("frame_rate"), QStringLiteral("protocol_version"), QStringLiteral("music_sha256"), QStringLiteral("accents"),
-                           QStringLiteral("operations")}) ||
-        !identifier(proposal.value(QStringLiteral("request_id"))) ||
+    const bool rhythmic = proposal.value(QStringLiteral("protocol_version")) == 4;
+    auto names = QStringList{QStringLiteral("request_id"), QStringLiteral("project_id"),       QStringLiteral("sequence_id"),  QStringLiteral("base_revision"),
+                             QStringLiteral("frame_rate"), QStringLiteral("protocol_version"), QStringLiteral("music_sha256"), QStringLiteral("operations")};
+    names.append(rhythmic ? QStringLiteral("anchors") : QStringLiteral("accents"));
+    if (rhythmic) names.append(QStringLiteral("analysis"));
+    const auto anchorKey = rhythmic ? QStringLiteral("anchors") : QStringLiteral("accents");
+    if (!validateTimingRequest(snapshot, timing).isEmpty() || !fields(proposal, names) || !identifier(proposal.value(QStringLiteral("request_id"))) ||
         proposal.value(QStringLiteral("project_id")) != snapshot.value(QStringLiteral("project_id")) ||
         proposal.value(QStringLiteral("sequence_id")) != snapshot.value(QStringLiteral("sequence_id")) ||
         proposal.value(QStringLiteral("base_revision")) != snapshot.value(QStringLiteral("revision")) ||
         proposal.value(QStringLiteral("frame_rate")) != snapshot.value(QStringLiteral("frame_rate")) ||
-        proposal.value(QStringLiteral("protocol_version")) != 2 ||
+        (!rhythmic && proposal.value(QStringLiteral("protocol_version")) != 2) ||
         proposal.value(QStringLiteral("music_sha256")) != timing.value(QStringLiteral("music")).toObject().value(QStringLiteral("sha256")) ||
-        !proposal.value(QStringLiteral("accents")).isArray() || !proposal.value(QStringLiteral("operations")).isArray())
+        !proposal.value(anchorKey).isArray() || !proposal.value(QStringLiteral("operations")).isArray())
         return invalid();
+    if (rhythmic) {
+        const auto analysis = proposal.value(QStringLiteral("analysis")).toObject();
+        if (!fields(analysis, {QStringLiteral("version"), QStringLiteral("mode"), QStringLiteral("bpm"), QStringLiteral("periodicity"),
+                               QStringLiteral("support"), QStringLiteral("reason"), QStringLiteral("cached")}) ||
+            analysis.value(QStringLiteral("version")) != QStringLiteral("periodic-onsets-1") || !analysis.value(QStringLiteral("cached")).isBool())
+            return invalid();
+        for (const auto &key : {QStringLiteral("bpm"), QStringLiteral("periodicity"), QStringLiteral("support")}) {
+            const auto number = analysis.value(key);
+            if (!number.isDouble() || !std::isfinite(number.toDouble()) || number.toDouble() < 0 ||
+                number.toDouble() > (key == QStringLiteral("bpm") ? 180 : 1))
+                return invalid();
+        }
+        const auto mode = analysis.value(QStringLiteral("mode")).toString(), reason = analysis.value(QStringLiteral("reason")).toString();
+        if (mode == QStringLiteral("beats")) {
+            if (analysis.value(QStringLiteral("bpm")).toDouble() < 60 || analysis.value(QStringLiteral("periodicity")).toDouble() < 0.55 ||
+                analysis.value(QStringLiteral("support")).toDouble() < 0.7 || reason != QStringLiteral("none") ||
+                proposal.value(anchorKey).toArray().size() < 5)
+                return invalid();
+        } else if (mode != QStringLiteral("accents") || analysis.value(QStringLiteral("bpm")).toDouble() ||
+                   analysis.value(QStringLiteral("periodicity")).toDouble() || analysis.value(QStringLiteral("support")).toDouble() ||
+                   !QStringList{QStringLiteral("insufficient_onsets"), QStringLiteral("weak_periodicity"), QStringLiteral("irregular_onsets"),
+                                QStringLiteral("unstable_tempo")}
+                        .contains(reason))
+            return invalid();
+    }
     const auto originals = timing.value(QStringLiteral("clips")).toArray(), operations = proposal.value(QStringLiteral("operations")).toArray();
     const auto first = originals.first().toObject().value(QStringLiteral("start_frame")).toInteger();
     const auto last = originals.last().toObject();
     const auto end = last.value(QStringLiteral("start_frame")).toInteger() + last.value(QStringLiteral("duration_frames")).toInteger();
     QSet<qint64> accents;
     qint64 previous = 0;
-    for (const auto value : proposal.value(QStringLiteral("accents")).toArray()) {
-        if (!integer(value, 1) || value.toInteger() <= previous || value.toInteger() >= end - first || accents.size() >= 128) return invalid();
+    for (const auto value : proposal.value(anchorKey).toArray()) {
+        if (!integer(value, 1) || value.toInteger() <= previous || value.toInteger() >= end - first || accents.size() >= (rhythmic ? 2048 : 128))
+            return invalid();
         previous = value.toInteger();
         accents.insert(first + previous);
     }

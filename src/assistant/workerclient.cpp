@@ -487,8 +487,16 @@ void Montaz::WorkerClient::readOutput()
             int changes = 0;
             for (int i = 1; i < operations.size(); ++i)
                 changes += originals[i].toObject().value(QStringLiteral("start_frame")) != operations[i].toObject().value(QStringLiteral("start_frame"));
-            record(QStringLiteral("timing_review"),
-                   {{QStringLiteral("cuts_shifted"), changes}, {QStringLiteral("max_shift_frames"), m_timingSpec.value(QStringLiteral("max_shift_frames"))}});
+            QJsonObject measurements{{QStringLiteral("cuts_shifted"), changes},
+                                     {QStringLiteral("max_shift_frames"), m_timingSpec.value(QStringLiteral("max_shift_frames"))}};
+            const auto analysis = proposal.value(QStringLiteral("analysis")).toObject();
+            if (!analysis.isEmpty()) {
+                for (const auto &key : {QStringLiteral("mode"), QStringLiteral("bpm"), QStringLiteral("periodicity"), QStringLiteral("support"),
+                                        QStringLiteral("reason"), QStringLiteral("cached"), QStringLiteral("version")})
+                    measurements[key] = analysis.value(key);
+                measurements[QStringLiteral("anchors_detected")] = proposal.value(QStringLiteral("anchors")).toArray().size();
+            }
+            record(QStringLiteral("timing_review"), measurements);
         } else if (type == QStringLiteral("proposal") && !m_musicRequest && !m_timingRequest && !m_cueRequest && !m_captionRequest && !m_matchRequest &&
                    m_ready && m_completed && m_proposal.isEmpty() && message.size() == (message.contains(QStringLiteral("review")) ? 4 : 3) &&
                    message.value(QStringLiteral("proposal")).isObject()) {

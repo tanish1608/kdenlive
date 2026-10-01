@@ -134,6 +134,7 @@ TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]
 
 TEST_CASE("Assistant refines existing cuts with native identities and atomic undo", "[Montaz]")
 {
+    const bool rhythmic = GENERATE(false, true);
     QTemporaryDir temporary;
     auto bin = pCore->projectItemModel();
     bin->clean();
@@ -187,6 +188,18 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
                              {QStringLiteral("music_sha256"), timing.value(QStringLiteral("music")).toObject().value(QStringLiteral("sha256"))},
                              {QStringLiteral("accents"), QJsonArray{shot + 3, 2 * shot - 3}},
                              {QStringLiteral("operations"), operations}};
+        if (rhythmic) {
+            proposal[QStringLiteral("protocol_version")] = 4;
+            proposal.remove(QStringLiteral("accents"));
+            proposal[QStringLiteral("anchors")] = QJsonArray{shot / 2, shot + 3, shot * 3 / 2, 2 * shot - 3, shot * 5 / 2};
+            proposal[QStringLiteral("analysis")] = QJsonObject{{QStringLiteral("version"), QStringLiteral("periodic-onsets-1")},
+                                                               {QStringLiteral("mode"), QStringLiteral("beats")},
+                                                               {QStringLiteral("bpm"), 120},
+                                                               {QStringLiteral("periodicity"), 1},
+                                                               {QStringLiteral("support"), 1},
+                                                               {QStringLiteral("reason"), QStringLiteral("none")},
+                                                               {QStringLiteral("cached"), false}};
+        }
         SECTION("Cue capture is read-only and rejects missing source evidence before generation")
         {
             const auto spec = adapter.cueRequest();
@@ -260,6 +273,34 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
             REQUIRE_FALSE(adapter.applyTiming(context, timing, proposal).isEmpty());
             REQUIRE(stack->count() == 0);
             REQUIRE(timeline->getClipPlaytime(ids[0]) == shot);
+        }
+        SECTION("Temporary selection permits timing Apply while permanent groups are rejected")
+        {
+            REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+            REQUIRE(adapter.timingRequest() == timing);
+            const auto selected = adapter.snapshot();
+            proposal[QStringLiteral("base_revision")] = selected.value(QStringLiteral("revision"));
+            REQUIRE(adapter.applyTiming(selected, timing, proposal).isEmpty());
+            REQUIRE(timeline->getClipPosition(ids[1]) == 20 + shot + 3);
+            REQUIRE(timeline->getClipPosition(ids[2]) == 20 + 2 * shot - 3);
+            REQUIRE(stack->count() == 1);
+            stack->undo();
+            REQUIRE(timeline->getClipPosition(ids[1]) == 20 + shot);
+            REQUIRE(timeline->checkConsistency());
+            timeline->requestClearSelection();
+            REQUIRE(timeline->requestClipsGroup({ids[0], ids[1]}) >= 0);
+            REQUIRE(adapter.timingRequest().isEmpty());
+        }
+        SECTION("Muted music and hidden video invalidate timing eligibility")
+        {
+            timeline->setTrackProperty(audio, QStringLiteral("hide"), QStringLiteral("3"));
+            REQUIRE(adapter.timingRequest().isEmpty());
+            REQUIRE_FALSE(adapter.applyTiming(context, timing, proposal).isEmpty());
+            timeline->setTrackProperty(audio, QStringLiteral("hide"), QStringLiteral("1"));
+            REQUIRE_FALSE(adapter.timingRequest().isEmpty());
+            timeline->setTrackProperty(video, QStringLiteral("hide"), QStringLiteral("1"));
+            REQUIRE(adapter.timingRequest().isEmpty());
+            REQUIRE(stack->count() == 0);
         }
         SECTION("Native partial resize is restored when the following batch step fails")
         {
@@ -868,6 +909,126 @@ TEST_CASE("Native object alignment survives serialization and export", "[Montaz]
         for (int i = 0; i < 3; ++i)
             REQUIRE(std::abs(decoded[i] - incoming[i]) < 0.007);
     }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    pCore->setCurrentProfile(oldProfile);
+}
+
+TEST_CASE("Estimated beat timing survives native undo serialization and export", "[Montaz]")
+{
+    const auto root = qEnvironmentVariable("MONTAZ_BEAT_QA_ROOT");
+    if (root.isEmpty()) {
+        SUCCEED("Set MONTAZ_BEAT_QA_ROOT for controlled rhythm render checks");
+        return;
+    }
+    const auto oldProfile = pCore->getCurrentProfilePath();
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto undo = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(undo);
+    pCore->projectManager()->testSetDocument(&document);
+    REQUIRE(pCore->setCurrentProfile(QStringLiteral("atsc_720p_25")));
+    auto timeline = TimelineItemModel::construct(document.uuid(), undo);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int video = -1, audio = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, video));
+    REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    QList<int> ids;
+    const QList<int> starts{0, 48, 102}, lengths{48, 54, 48};
+    for (int i = 0; i < 3; ++i) {
+        auto source = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), "avformat",
+                                                      QDir(root).filePath(QStringLiteral("shot-%1.mp4").arg(i)).toUtf8().constData());
+        REQUIRE(source->is_valid());
+        QString bid;
+        Fun addUndo = []() { return true; }, addRedo = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(bid, source, QStringLiteral("-1"), addUndo, addRedo));
+        int id = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/%2").arg(bid).arg(lengths[i] - 1), video, starts[i], id, true, false, false));
+        ids << id;
+    }
+    const auto musicPath = QDir(root).filePath(QStringLiteral("rhythm.wav"));
+    auto producer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), "avformat", musicPath.toUtf8().constData());
+    REQUIRE(producer->is_valid());
+    producer->set("kdenlive:montaz_role", "music");
+    QString musicId;
+    {
+        Fun u = []() { return true; }, r = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(musicId, producer, QStringLiteral("-1"), u, r));
+    }
+    int musicClip = -1;
+    REQUIRE(timeline->requestClipInsertion(QStringLiteral("A%1/0/149").arg(musicId), audio, 0, musicClip, true, false, false));
+    REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+    undo->clear();
+    {
+        auto render = [&root](Mlt::Producer &source, const QString &name) {
+            const auto path = QDir(root).filePath(name);
+            Mlt::Consumer consumer(pCore->getProjectProfile(), "avformat", path.toUtf8().constData());
+            REQUIRE(consumer.is_valid());
+            consumer.set("f", "matroska");
+            consumer.set("vcodec", "ffv1");
+            consumer.set("acodec", "pcm_s16le");
+            consumer.set("ar", 8000);
+            consumer.set("channels", 2);
+            consumer.set("real_time", -1);
+            consumer.set("terminate_on_pause", 1);
+            std::unique_ptr<Mlt::Producer> zone(source.cut(0, 149));
+            consumer.connect(*zone);
+            consumer.run();
+            REQUIRE(QFileInfo(path).size() > 1000);
+        };
+        render(*timeline->tractor(), QStringLiteral("before.mkv"));
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot(), spec = adapter.timingRequest();
+        REQUIRE_FALSE(spec.isEmpty());
+        QFile input(QDir(root).filePath(QStringLiteral("timing.json")));
+        REQUIRE(input.open(QIODevice::ReadOnly));
+        auto proposal = QJsonDocument::fromJson(input.readAll()).object();
+        REQUIRE(proposal.value(QStringLiteral("frame_rate")) == context.value(QStringLiteral("frame_rate")));
+        REQUIRE(proposal.value(QStringLiteral("analysis")).toObject().value(QStringLiteral("mode")) == QStringLiteral("beats"));
+        proposal[QStringLiteral("project_id")] = context.value(QStringLiteral("project_id"));
+        proposal[QStringLiteral("sequence_id")] = context.value(QStringLiteral("sequence_id"));
+        proposal[QStringLiteral("base_revision")] = context.value(QStringLiteral("revision"));
+        auto operations = proposal.value(QStringLiteral("operations")).toArray();
+        REQUIRE(operations.size() == 3);
+        const auto nativeClips = spec.value(QStringLiteral("clips")).toArray();
+        for (int i = 0; i < 3; ++i) {
+            auto op = operations[i].toObject();
+            for (const auto &key : {QStringLiteral("instance_id"), QStringLiteral("bin_id"), QStringLiteral("track_id")})
+                op[key] = nativeClips[i].toObject().value(key);
+            operations[i] = op;
+        }
+        proposal[QStringLiteral("operations")] = operations;
+        REQUIRE(adapter.applyTiming(context, spec, proposal).isEmpty());
+        REQUIRE(undo->count() == 1);
+        REQUIRE(timeline->getClipPosition(ids[1]) == 50);
+        REQUIRE(timeline->getClipPosition(ids[2]) == 100);
+        REQUIRE(timeline->getClipPlaytime(musicClip) == 150);
+        REQUIRE(timeline->getClipPosition(musicClip) == 0);
+        REQUIRE(timeline->getClipIn(musicClip) == 0);
+        REQUIRE(timeline->duration() == 150);
+        REQUIRE(timeline->checkConsistency());
+        undo->undo();
+        REQUIRE(timeline->getClipPosition(ids[1]) == 48);
+        REQUIRE(timeline->getClipPosition(ids[2]) == 102);
+        undo->redo();
+        REQUIRE(timeline->getClipPosition(ids[1]) == 50);
+        REQUIRE(timeline->getClipPosition(ids[2]) == 100);
+        const auto scene = QDir(root).filePath(QStringLiteral("timing.mlt"));
+        {
+            Mlt::Consumer serializer(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+            REQUIRE(serializer.is_valid());
+            serializer.connect(*timeline->tractor());
+            serializer.run();
+        }
+        Mlt::Producer reopened(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+        REQUIRE(reopened.is_valid());
+        // Kdenlive's black background includes seek padding beyond the content.
+        // Export the exact reviewed zone, as the native render path does.
+        render(reopened, QStringLiteral("aligned.mkv"));
+    }
+    undo->clear();
     pCore->taskManager.slotCancelJobs();
     document.closing = true;
     bin->clean();

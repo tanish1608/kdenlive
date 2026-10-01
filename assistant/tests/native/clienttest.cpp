@@ -513,10 +513,13 @@ CHANGE
 send({'type':'timing','proposal':p})
 EXIT
 )PY";
-        for (int fault = 0; fault < 4; ++fault) {
+        for (int fault = 0; fault < 5; ++fault) {
             auto worker = script;
             worker.replace("FAULT", fault == 3 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)" : "pass");
-            worker.replace("CHANGE", fault == 1 ? "p['operations'][0]['in_frame']=1" : "pass");
+            worker.replace("CHANGE", fault == 1   ? "p['operations'][0]['in_frame']=1"
+                                     : fault == 4 ? "p['protocol_version']=4;p.pop('accents');p['anchors']=[15,30,45,64,90,116,150];p['analysis']=dict(version="
+                                                    "'periodic-onsets-1',mode='beats',bpm=120,periodicity=.9,support=.9,reason='none',cached=True)"
+                                                  : "pass");
             worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
             QTemporaryDir temp;
             fakeWorker(temp.path(), worker);
@@ -529,10 +532,47 @@ EXIT
                 client.stop();
             }
             QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
-            QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
-            QCOMPARE(failures.count(), fault > 0 && fault != 3 ? 1 : 0);
+            QCOMPARE(ready.count(), fault == 0 || fault == 4 ? 1 : 0);
+            QCOMPARE(failures.count(), fault == 1 || fault == 2 ? 1 : 0);
             QCOMPARE(stopped.count(), fault == 3 ? 1 : 0);
         }
+    }
+    void rhythmicTimingRequiresStrictEvidenceAndObservedAnchors()
+    {
+        auto value = timingProposal();
+        value["protocol_version"] = 4;
+        value.remove("accents");
+        value["anchors"] = QJsonArray{15, 30, 45, 64, 90, 116, 150};
+        const QJsonObject analysis{
+            {"version", "periodic-onsets-1"}, {"mode", "beats"}, {"bpm", 120}, {"periodicity", 0.9}, {"support", 0.9}, {"reason", "none"}, {"cached", false}};
+        value["analysis"] = analysis;
+        QVERIFY(Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), value).isEmpty());
+        for (const auto &change : {QJsonObject{{"version", "old"}}, QJsonObject{{"mode", "downbeats"}}, QJsonObject{{"bpm", true}}, QJsonObject{{"bpm", 181}},
+                                   QJsonObject{{"periodicity", 0.54}}, QJsonObject{{"support", 0.69}}, QJsonObject{{"reason", "weak_periodicity"}},
+                                   QJsonObject{{"cached", 0}}, QJsonObject{{"extra", 1}}}) {
+            auto malformed = value;
+            auto evidence = analysis;
+            for (auto it = change.begin(); it != change.end(); ++it)
+                evidence[it.key()] = it.value();
+            malformed["analysis"] = evidence;
+            QVERIFY(!Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), malformed).isEmpty());
+        }
+        for (const auto &anchors :
+             {QJsonArray{15, 30, 45, 63, 90, 116, 150}, QJsonArray{64, 116}, QJsonArray{15, 30, 45, 64, 64, 116}, QJsonArray{15, 30, 45, 64, 116, 180}}) {
+            auto malformed = value;
+            malformed["anchors"] = anchors;
+            QVERIFY(!Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), malformed).isEmpty());
+        }
+        auto fallback = analysis;
+        fallback["mode"] = "accents";
+        fallback["bpm"] = fallback["periodicity"] = fallback["support"] = 0;
+        fallback["reason"] = "unstable_tempo";
+        value["analysis"] = fallback;
+        value["anchors"] = QJsonArray{64, 116};
+        QVERIFY(Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), value).isEmpty());
+        fallback["support"] = 0.9;
+        value["analysis"] = fallback;
+        QVERIFY(!Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), value).isEmpty());
     }
     void cuesRequireNativeShotBoundsEvidenceIdentityAndSparseAvailableAudio()
     {

@@ -86,8 +86,11 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    import/undo path. Cached visual observations now support up to three sparse
    reviewed foley suggestions; a selected cue must be generated and previewed
    separately before native Apply. Live Goa verification is recorded in the
-   quality review. Beat/phrase analysis, ducking and native fade-effect proposals
-   remain pending.
+   quality review. Downbeat/phrase analysis, ducking and native fade-effect proposals
+   remain pending. A conservative local rhythm estimate now supports reviewed
+   cut timing, with cached observed anchors and explicit accent fallback;
+   downbeats, phrases and variable-tempo tracking still need work. See
+   [music timing](music-timing.md).
 3. **Narration and captions — first iteration:** separately cached selected-audio
    speech recognition, local silence skipping, terminal empty reviews, reviewed
    native subtitle batches and Clean/Bold/Original render presets are implemented.

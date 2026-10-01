@@ -312,3 +312,21 @@ target; the initial crashes were test setup/cleanup defects, not editor failures
 Two selected cuts in the latest Goa draft returned no compatible objects, which
 correctly leaves their timeline unchanged. These checks prove the narrow
 integration, not better travel-film quality or identity tracking on all footage.
+
+### Local rhythm checkpoint, October 1
+
+While Claude works on object candidates in the isolated collaboration branch,
+Codex added conservative local beat estimates for Align cuts. Multi-band onset
+recurrence supports 60–180 BPM estimates; ambiguous music retains labelled energy
+accents. Content/FPS/span/version caching, strict protocol-v4 timing metadata,
+redacted measurements and post-analysis music verification are implemented.
+Legacy timing-v2 remains accepted; object-match protocol-v3 is unchanged.
+
+Temporary selection now works for native retiming. A controlled native export
+moved cuts 48/102 to 50/100, preserved all 150 frames and byte-identical audio,
+and passed one Undo/Redo and serialization. Real short Goa music returned weak
+periodicity without changing the project. 148 Python checks pass (two optional
+tracker checks skipped), 39/7 Qt transport/chat checks pass, and the editor/full
+native tests plus the independent render check pass. See [music timing](music-timing.md).
+Downbeats/phrases, variable-tempo evaluation and complete film quality remain open;
+Claude's branch is not reviewed or merged until the user reports completion.

@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Montaz contributors
-"""Local, conservative cut refinement against music energy accents."""
+"""Local, conservative cut refinement against supported beats or energy accents."""
 
-import hashlib
+import os
 import re
 from pathlib import Path
 
+from .beats import MAX_ANCHORS, analyze, music_hash
 from .gemini import AssistantError
 from .music import measure
 from .protocol import fields, frame
@@ -23,7 +24,9 @@ def timing_spec(snapshot, raw):
         or type(spec["clips"]) is not list
         or not 2 <= len(spec["clips"]) <= 256
         or frame(spec["max_shift_frames"], 1)
-        != max(1, snapshot.frame_rate.numerator // (4 * snapshot.frame_rate.denominator))
+        != max(
+            1, snapshot.frame_rate.numerator // (4 * snapshot.frame_rate.denominator)
+        )
     ):
         raise AssistantError("invalid_timing_request")
     assets = {a.bin_id: a for a in snapshot.assets}
@@ -36,7 +39,14 @@ def timing_spec(snapshot, raw):
     for clip in spec["clips"]:
         fields(
             clip,
-            {"instance_id", "bin_id", "track_id", "start_frame", "in_frame", "duration_frames"},
+            {
+                "instance_id",
+                "bin_id",
+                "track_id",
+                "start_frame",
+                "in_frame",
+                "duration_frames",
+            },
         )
         if any(type(clip[k]) is not str for k in ("instance_id", "bin_id", "track_id")):
             raise AssistantError("invalid_timing_request")
@@ -69,7 +79,11 @@ def timing_spec(snapshot, raw):
             raise AssistantError("invalid_timing_request")
         seen.add(clip["instance_id"])
         previous, track_id = start + length, track.track_id
-    audio = occupied.get(music["instance_id"]) if type(music["instance_id"]) is str else None
+    audio = (
+        occupied.get(music["instance_id"])
+        if type(music["instance_id"]) is str
+        else None
+    )
     if (
         not audio
         or tracks[audio.track_id].kind != "audio"
@@ -84,15 +98,18 @@ def timing_spec(snapshot, raw):
     return spec
 
 
-def refine(snapshot, request_id, spec, accents):
-    """Maximize feasible accent matches, then minimize movement with dynamic programming."""
+def refine(snapshot, request_id, spec, accents, *, maximum_anchors=128):
+    """Maximize feasible anchor matches, then minimize movement with dynamic programming."""
     spec = timing_spec(snapshot, spec)
     clips = spec["clips"]
     assets = {a.bin_id: a for a in snapshot.assets}
-    start, end = clips[0]["start_frame"], clips[-1]["start_frame"] + clips[-1]["duration_frames"]
+    start, end = (
+        clips[0]["start_frame"],
+        clips[-1]["start_frame"] + clips[-1]["duration_frames"],
+    )
     if (
         type(accents) is not list
-        or len(accents) > 128
+        or len(accents) > maximum_anchors
         or any(type(x) is not int or not 0 < x < end - start for x in accents)
         or accents != sorted(set(accents))
     ):
@@ -107,7 +124,8 @@ def refine(snapshot, request_id, spec, accents):
         options = (
             {end}
             if index == len(clips) - 1
-            else {original} | {p for p in points if abs(p - original) <= spec["max_shift_frames"]}
+            else {original}
+            | {p for p in points if abs(p - original) <= spec["max_shift_frames"]}
         )
         following = {}
         for point in sorted(options):
@@ -129,7 +147,11 @@ def refine(snapshot, request_id, spec, accents):
         raise AssistantError("invalid_timing_request")
     boundaries = states[end][1]
     operations = [
-        dict(c, start_frame=boundaries[i], duration_frames=boundaries[i + 1] - boundaries[i])
+        dict(
+            c,
+            start_frame=boundaries[i],
+            duration_frames=boundaries[i + 1] - boundaries[i],
+        )
         for i, c in enumerate(clips)
     ]
     if operations == clips:
@@ -140,7 +162,8 @@ def refine(snapshot, request_id, spec, accents):
         sequence_id=snapshot.sequence_id,
         base_revision=snapshot.revision,
         frame_rate=dict(
-            numerator=snapshot.frame_rate.numerator, denominator=snapshot.frame_rate.denominator
+            numerator=snapshot.frame_rate.numerator,
+            denominator=snapshot.frame_rate.denominator,
         ),
         protocol_version=2,
         music_sha256=spec["music"]["sha256"],
@@ -152,16 +175,32 @@ def refine(snapshot, request_id, spec, accents):
 def refine_timing(snapshot, request_id, raw_spec, media):
     spec = timing_spec(snapshot, raw_spec)
     path = Path(spec["music"]["path"])
-    if not path.is_file() or path.stat().st_size > 128 * 1024 * 1024:
-        raise AssistantError("invalid_timing_request")
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        while chunk := file.read(1024 * 1024):
-            media.check()
-            digest.update(chunk)
-    if digest.hexdigest() != spec["music"]["sha256"]:
+    if music_hash(path, media) != spec["music"]["sha256"]:
         raise AssistantError("media_changed")
-    audio = next(o for o in snapshot.occupied if o.instance_id == spec["music"]["instance_id"])
-    accents = measure(path, snapshot.frame_rate, audio.duration_frames, media)["accents"]
+    audio = next(
+        o for o in snapshot.occupied if o.instance_id == spec["music"]["instance_id"]
+    )
+    cache = Path(
+        os.environ.get("MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis")
+    )
+    analysis = analyze(
+        path,
+        snapshot.frame_rate,
+        audio.duration_frames,
+        spec["music"]["sha256"],
+        cache / "beats",
+        media,
+    )
+    anchors = analysis.pop("beats")
+    if analysis["mode"] == "accents":
+        anchors = measure(path, snapshot.frame_rate, audio.duration_frames, media)[
+            "accents"
+        ]
+    if music_hash(path, media) != spec["music"]["sha256"]:
+        raise AssistantError("media_changed")
     media.check()
-    return refine(snapshot, request_id, spec, accents)
+    proposal = refine(snapshot, request_id, spec, anchors, maximum_anchors=MAX_ANCHORS)
+    proposal.update(
+        protocol_version=4, anchors=proposal.pop("accents"), analysis=analysis
+    )
+    return proposal

@@ -299,3 +299,28 @@ Validation: 140 passing Python checks plus two optional native helper checks;
 38 Qt transport, seven chat checks, native `assistanttest`, and controlled rendered
 QA pass. Beat/phrase analysis, candidate search, manual anchors, directional whips,
 object wipes and speed ramps remain pending. Generic pacing presets remain in use.
+
+## Estimated beat timing checkpoint
+
+Align cuts now estimates a conservative steady rhythm locally, with cached,
+observed anchors and explicit energy-accent fallback. Its native protocol-v4
+proposal retains bounded shifts, original sources/order/span and one Undo.
+Temporary multiselection no longer fails eligibility; permanent groups and
+muted/hidden/effect-bearing media remain ineligible.
+
+The reproducible 120 BPM fixture moved frames **48/102 → 50/100**. Native Apply,
+Undo/Redo and serialization passed; decoding every frame of the **150-frame**
+export confirmed the boundaries. Before/after PCM audio was byte-identical, and
+audio attacks agree within one frame of both cuts. A ten-minute synthetic track
+analyzed in approximately 1.65 seconds and reused complete cached evidence.
+
+Read-only analysis of the existing short Goa instrumental returned
+`weak_periodicity`, retaining honest accent fallback. No user project or footage
+was changed and no generation request was made. This does not establish better
+musical taste, phrase detection or a better complete travel film.
+
+148 Python tests passed, two optional tracker tests skipped; 39 Qt transport and
+seven chat checks passed. The editor/native tests built, and full native tests
+plus the independent controlled render check passed. Reproduce the evidence and
+read algorithm limitations in [music timing](music-timing.md). Claude's object
+candidate improvements remain isolated and unmerged.

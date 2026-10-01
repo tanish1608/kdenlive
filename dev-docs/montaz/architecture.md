@@ -56,15 +56,19 @@ revalidates immediately before application on its GUI thread and rejects stale
 or replayed requests. No AI-supplied code, shell commands, effect expressions, or
 arbitrary file paths are executable operations.
 
-The separate `refine_timing` request returns protocol-v2 retiming operations for
-existing native clip IDs. It measures the placed music locally and proposes
+The separate `refine_timing` request returns protocol-v4 retiming operations for
+existing native clip IDs, with strict rhythm measurements and observed anchors.
+Protocol-v2 accent proposals remain accepted. It measures the placed music locally and proposes
 bounded boundary shifts while retaining source starts, order and total span.
 Native eligibility excludes grouped clips, speed/effect/transition/subtitle
 edits, other audio and noncontiguous/multiple video tracks. Source bounds and
 the music checksum are validated again before mutation. Apply uses native resize
 and move commands; affected clips are briefly shortened to avoid overlap during
 the atomic batch, then moved and resized, retaining their identities. One Undo
-restores the edit. These are energy accents, not verified beats or phrase timing.
+restores the edit. Recurring multi-band onsets support a conservative steady beat
+estimate; ambiguous music falls back to labelled energy accents. Audio-content,
+FPS, duration and algorithm-version caching reuse the estimate. Neither method
+identifies downbeats or musical phrases; see [music timing](music-timing.md).
 
 Application must be one atomic, undoable batch using Kdenlive's command APIs.
 Prevalidate every operation; accumulate undo/redo functions; roll back all prior

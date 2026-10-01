@@ -17,6 +17,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 6. [Implementation checklist](work-plan.md): chat milestone and footage-quality gates.
 7. [Output review](quality-review.md): exported footage, measurements and remaining quality gaps.
 8. [Engineering collaboration](collaboration.md): Claude's scoped assignment, isolated branch, validation and Codex review/merge workflow.
+9. [Music timing](music-timing.md): conservative beat estimates, accent fallback, caching and native export checks.
 
 ## Current state
 
