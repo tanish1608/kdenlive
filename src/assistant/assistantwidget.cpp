@@ -63,7 +63,13 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     layout->addLayout(options);
     m_music = new QPushButton(QIcon::fromTheme(QStringLiteral("audio-x-generic")), i18n("Add music"), this);
     m_music->setToolTip(i18n("Compose an ElevenLabs instrumental for the current timeline. Save the project first."));
-    layout->addWidget(m_music);
+    auto soundActions = new QHBoxLayout;
+    soundActions->addWidget(m_music);
+    m_align = new QPushButton(i18n("Align cuts"), this);
+    m_align->setToolTip(i18n("Review small cut shifts to accents in your existing assistant music."));
+    soundActions->addWidget(m_align);
+    layout->addLayout(soundActions);
+    connect(m_align, &QPushButton::clicked, this, &AssistantWidget::refineTiming);
     connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
     m_tasks = new QTreeWidget(this);
     m_tasks->setObjectName(QStringLiteral("assistantTasks"));
@@ -147,6 +153,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     connect(m_worker, &WorkerClient::busyChanged, this, [this](bool busy) {
         m_plan->setEnabled(!busy);
         m_music->setEnabled(!busy);
+        m_align->setEnabled(!busy);
         m_stop->setEnabled(busy);
         m_newBrief->setEnabled(!busy);
         m_chat->setBusy(busy);
@@ -166,13 +173,20 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(i18n("Stopped"));
-        reply(m_musicMode ? i18n("Stopped. No audio was applied. Completed music is kept for reuse; ElevenLabs may still finish a submitted request.")
-                          : i18n("Stopped. Completed footage analysis is saved for your next attempt."));
+        reply(m_timingMode  ? i18n("Stopped. Your cuts and music stay unchanged.")
+              : m_musicMode ? i18n("Stopped. No audio was applied. Completed music is kept for reuse; ElevenLabs may still finish a submitted request.")
+                            : i18n("Stopped. Completed footage analysis is saved for your next attempt."));
     });
     connect(m_worker, &WorkerClient::failed, this, [this](const QString &code) {
         if (m_activeTask < 0) return;
         clearProposal();
-        finishTasks(i18n("Failed"));
+        finishTasks(code == QStringLiteral("no_alignment_needed") ? i18n("No change") : i18n("Failed"));
+        if (m_timingMode) {
+            reply(code == QStringLiteral("no_alignment_needed")
+                      ? i18n("No useful cut shifts fit the current footage and music. Your edit stays unchanged.")
+                      : i18n("Timing refinement could not be prepared. Your edit stays unchanged; check the current sequence and music."));
+            return;
+        }
         if (m_musicMode) {
             if (code == QStringLiteral("missing_music_key"))
                 reply(i18n("ElevenLabs is not configured. Set ELEVENLABS_API_KEY or elevenlabs_api_key in the private assistant settings."));
@@ -317,7 +331,56 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_activeTask = 2;
         reply(i18n("Your instrumental is ready. Apply adds it to a free audio track as one undoable edit. Existing audio stays in place."));
     });
+    connect(m_worker, &WorkerClient::timingReady, this, [this](const QJsonObject &proposal) {
+        if (m_adapter->snapshot() != m_snapshot || !validateTimingProposal(m_snapshot, m_timingSpec, proposal).isEmpty()) {
+            clearProposal();
+            finishTasks(i18n("Outdated"));
+            reply(i18n("The sequence changed. Choose Align cuts for a fresh timing review."));
+            return;
+        }
+        m_timingProposal = proposal;
+        const auto rate = m_snapshot.value(QStringLiteral("frame_rate")).toObject();
+        const double unit = double(rate.value(QStringLiteral("denominator")).toInt()) / rate.value(QStringLiteral("numerator")).toInt();
+        const auto originals = m_timingSpec.value(QStringLiteral("clips")).toArray(), operations = proposal.value(QStringLiteral("operations")).toArray();
+        for (int i = 1; i < operations.size(); ++i) {
+            const int before = originals[i].toObject().value(QStringLiteral("start_frame")).toInt(),
+                      after = operations[i].toObject().value(QStringLiteral("start_frame")).toInt();
+            if (before == after) continue;
+            m_preview->addItem(
+                i18n("Cut %1 · %2 → %3 s (%4 frames)", i, QString::number(before * unit, 'f', 2), QString::number(after * unit, 'f', 2), after - before));
+            m_preview->item(m_preview->count() - 1)
+                ->setData(Qt::UserRole, i18n("Moves to a measured energy accent. Adjacent shot lengths change; footage is not stretched. This is not a "
+                                             "verified beat or phrase boundary."));
+        }
+        m_preview->setCurrentRow(0);
+        m_previewCard->setTitle(i18n("Proposed cut timing"));
+        m_apply->setText(i18n("Apply timing"));
+        m_apply->setEnabled(true);
+        m_previewCard->show();
+        setTask(0, i18n("Done"));
+        setTask(1, i18n("Done"));
+        setTask(2, i18n("Ready"));
+        m_activeTask = 2;
+        reply(i18np("One cut shift is ready for review. Apply changes the existing clips in one undoable edit and keeps the music and total length.",
+                    "%1 cut shifts are ready for review. Apply changes the existing clips in one undoable edit and keeps the music and total length.",
+                    m_preview->count()));
+    });
     connect(m_apply, &QPushButton::clicked, this, [this]() {
+        if (!m_timingProposal.isEmpty()) {
+            const auto proposal = m_timingProposal;
+            m_applying = true;
+            const auto result = m_adapter->applyTiming(m_snapshot, m_timingSpec, proposal);
+            m_applying = false;
+            m_worker->recordApply(proposal.value(QStringLiteral("request_id")).toString(), result);
+            clearProposal();
+            setTask(2, i18n("Done"));
+            setTask(3, result.isEmpty() ? i18n("Done") : i18n("Failed"));
+            m_activeTask = -1;
+            reply(result.isEmpty() ? i18n("Cut timing refined. One Undo restores the original cuts. Music and total length stay unchanged.")
+                  : result == QStringLiteral("rollback_failed") ? i18n("The refinement could not be fully reverted. Reopen the project before trying again.")
+                                                                : i18n("Timing refinement could not be applied. Request a fresh review."));
+            return;
+        }
         if (!m_soundtrack.isEmpty()) {
             const auto soundtrack = m_soundtrack;
             m_applying = true;
@@ -349,7 +412,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     connect(m_adapter, &EditorAdapter::invalidated, this, [this]() {
         if (m_applying) return;
-        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || m_worker->busy()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || m_worker->busy()) {
             const bool busy = m_worker->busy();
             clearProposal();
             if (busy) m_worker->stop();
@@ -369,7 +432,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     contextTimer->start();
     const auto briefChanged = [this]() {
-        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty()) {
             clearProposal();
             finishTasks(i18n("Outdated"));
             reply(i18n("Editing style or duration changed. Send a message to request a new plan."));
@@ -384,6 +447,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
 {
     clearProposal();
     m_musicMode = false;
+    m_timingMode = false;
     const QStringList taskNames{i18n("Understand footage"), i18n("Arrange the story"), i18n("Review proposed shots"), i18n("Apply to timeline")};
     for (int row = 0; row < 4; ++row)
         m_tasks->topLevelItem(row)->setText(0, taskNames[row]);
@@ -466,6 +530,8 @@ void Montaz::AssistantWidget::clearProposal()
     m_proposal = {};
     m_soundtrack = {};
     m_musicSpec = {};
+    m_timingSpec = {};
+    m_timingProposal = {};
     m_listen->setChecked(false);
     m_audioPreview->stop();
     m_audioPreview->setSource({});
@@ -483,6 +549,7 @@ void Montaz::AssistantWidget::composeMusic()
     clearProposal();
     finishTasks(i18n("Superseded"));
     m_musicMode = true;
+    m_timingMode = false;
     m_musicSpec = m_adapter->musicRequest(m_recipe->currentData().toString(), m_brief);
     m_snapshot = m_adapter->snapshot();
     m_contextKey = m_adapter->contextKey();
@@ -503,4 +570,34 @@ void Montaz::AssistantWidget::composeMusic()
     setTask(0, i18n("Working"));
     m_tasks->show();
     reply(i18n("I’ll compose an instrumental for the current video using this travel style. Stop cancels local processing; Apply is available after review."));
+}
+
+void Montaz::AssistantWidget::refineTiming()
+{
+    clearProposal();
+    finishTasks(i18n("Superseded"));
+    m_timingMode = true;
+    m_musicMode = false;
+    m_timingSpec = m_adapter->timingRequest();
+    m_snapshot = m_adapter->snapshot();
+    m_contextKey = m_adapter->contextKey();
+    if (m_timingSpec.isEmpty()) {
+        reply(i18n("Use one continuous video track with at least two shots and assistant music covering the edit. This refinement requires normal-speed, "
+                   "ungrouped clips without effects, transitions, subtitles or other audio."));
+        return;
+    }
+    if (!m_worker->start(m_snapshot, {{QStringLiteral("timing"), m_timingSpec}})) {
+        reply(i18n("Timing refinement could not start. Check the active sequence."));
+        return;
+    }
+    const QStringList tasks{i18n("Measure music accents"), i18n("Validate cut shifts"), i18n("Review timing changes"), i18n("Apply refinement")};
+    for (int row = 0; row < 4; ++row) {
+        m_tasks->topLevelItem(row)->setText(0, tasks[row]);
+        setTask(row, i18n("Waiting"));
+    }
+    m_activeTask = 0;
+    setTask(0, i18n("Working"));
+    m_tasks->show();
+    reply(i18n("I’ll measure your existing music and propose small cut shifts. Shot order, source starts, music and total length stay unchanged. No new "
+               "generation is needed."));
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Montaz contributors
+#include "assistant/editbatch.h"
 #include "assistant/editoradapter.h"
 #include "doc/kdenlivedoc.h"
 #include "test_utils.hpp"
@@ -10,6 +11,27 @@
 #include <QJsonArray>
 #include <QTemporaryDir>
 #include <cmath>
+
+namespace {
+void writeMusicWave(const QString &path, int seconds)
+{
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::WriteOnly));
+    QDataStream writer(&file);
+    writer.setByteOrder(QDataStream::LittleEndian);
+    const quint32 samples = 48000 * seconds, bytes = samples * 4;
+    writer.writeRawData("RIFF", 4);
+    writer << quint32(36 + bytes);
+    writer.writeRawData("WAVEfmt ", 8);
+    writer << quint32(16) << quint16(1) << quint16(2) << quint32(48000) << quint32(192000) << quint16(4) << quint16(16);
+    writer.writeRawData("data", 4);
+    writer << bytes;
+    for (quint32 i = 0; i < samples; ++i) {
+        const auto value = qint16(4000 * std::sin(i * 2.0 * 3.141592653589793 * 440 / 48000));
+        writer << value << value;
+    }
+}
+} // namespace
 
 TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]")
 {
@@ -97,6 +119,138 @@ TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]
             REQUIRE(timeline->getTrackClipsCount(video) == 0);
             REQUIRE(stack->count() == 0);
         }
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+}
+
+TEST_CASE("Assistant refines existing cuts with native identities and atomic undo", "[Montaz]")
+{
+    QTemporaryDir temporary;
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto stack = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(stack);
+    document.setUrl(QUrl::fromLocalFile(temporary.filePath(QStringLiteral("timing.kdenlive"))));
+    pCore->projectManager()->testSetDocument(&document);
+    auto timeline = TimelineItemModel::construct(document.uuid(), stack);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int video = -1, audio = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, video));
+    REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    {
+        const auto fps = pCore->getProjectFpsInfo();
+        const int shot = int(2.0 * fps.first / fps.second);
+        const auto source = KdenliveTests::createProducerWithSound(pCore->getProjectProfile(), bin, shot * 4);
+        std::vector<int> ids;
+        for (int i = 0; i < 3; ++i) {
+            int id = -1;
+            REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/5/%2").arg(source).arg(shot + 4), video, 20 + i * shot, id));
+            ids.push_back(id);
+        }
+        const QString musicPath = temporary.filePath(QStringLiteral("music.wav"));
+        writeMusicWave(musicPath, 8);
+        auto producer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), "avformat", musicPath.toUtf8().constData());
+        REQUIRE(producer->is_valid());
+        producer->set("kdenlive:montaz_role", "music");
+        Fun undo = []() { return true; }, redo = []() { return true; };
+        QString musicId;
+        REQUIRE(bin->requestAddBinClip(musicId, producer, QStringLiteral("-1"), undo, redo));
+        int musicClip = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("A%1/0/%2").arg(musicId).arg(shot * 3 - 1), audio, 20, musicClip));
+        stack->clear();
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot(), timing = adapter.timingRequest();
+        REQUIRE_FALSE(timing.isEmpty());
+        auto operations = timing.value(QStringLiteral("clips")).toArray();
+        for (int i = 0; i < 3; ++i) {
+            auto op = operations[i].toObject();
+            op[QStringLiteral("start_frame")] = 20 + i * shot + (i == 1 ? 3 : i == 2 ? -3 : 0);
+            op[QStringLiteral("duration_frames")] = shot + (i == 1 ? -6 : 3);
+            operations[i] = op;
+        }
+        QJsonObject proposal{{QStringLiteral("request_id"), QStringLiteral("native-timing")},
+                             {QStringLiteral("project_id"), context.value(QStringLiteral("project_id"))},
+                             {QStringLiteral("sequence_id"), context.value(QStringLiteral("sequence_id"))},
+                             {QStringLiteral("base_revision"), context.value(QStringLiteral("revision"))},
+                             {QStringLiteral("frame_rate"), context.value(QStringLiteral("frame_rate"))},
+                             {QStringLiteral("protocol_version"), 2},
+                             {QStringLiteral("music_sha256"), timing.value(QStringLiteral("music")).toObject().value(QStringLiteral("sha256"))},
+                             {QStringLiteral("accents"), QJsonArray{shot + 3, 2 * shot - 3}},
+                             {QStringLiteral("operations"), operations}};
+        SECTION("Apply and one Undo/Redo preserve IDs, source starts, bin, audio and duration")
+        {
+            const int assets = bin->getAllClipIds().size();
+            REQUIRE(adapter.applyTiming(context, timing, proposal).isEmpty());
+            REQUIRE(stack->count() == 1);
+            REQUIRE(bin->getAllClipIds().size() == assets);
+            REQUIRE(timeline->getTrackClipsCount(video) == 3);
+            REQUIRE(timeline->getClipPosition(musicClip) == 20);
+            REQUIRE(timeline->getClipPlaytime(musicClip) == 3 * shot);
+            REQUIRE(timeline->checkConsistency());
+            for (int i = 0; i < 3; ++i) {
+                REQUIRE(timeline->getClipPosition(ids[i]) == operations[i].toObject().value(QStringLiteral("start_frame")).toInt());
+                REQUIRE(timeline->getClipPlaytime(ids[i]) == operations[i].toObject().value(QStringLiteral("duration_frames")).toInt());
+                REQUIRE(timeline->getClipIn(ids[i]) == 5);
+            }
+            REQUIRE_FALSE(adapter.applyTiming(context, timing, proposal).isEmpty());
+            stack->undo();
+            for (int i = 0; i < 3; ++i) {
+                REQUIRE(timeline->getClipPosition(ids[i]) == 20 + i * shot);
+                REQUIRE(timeline->getClipPlaytime(ids[i]) == shot);
+                REQUIRE(timeline->getClipIn(ids[i]) == 5);
+            }
+            REQUIRE(timeline->checkConsistency());
+            stack->redo();
+            REQUIRE(timeline->getClipPosition(ids[1]) == 20 + shot + 3);
+            REQUIRE(timeline->getClipPlaytime(ids[1]) == shot - 6);
+            REQUIRE(timeline->checkConsistency());
+        }
+        SECTION("A changed source start and changed music fail before mutation")
+        {
+            auto bad = proposal;
+            auto badOperations = operations;
+            auto first = badOperations[0].toObject();
+            first[QStringLiteral("in_frame")] = 6;
+            badOperations[0] = first;
+            bad[QStringLiteral("operations")] = badOperations;
+            REQUIRE_FALSE(adapter.applyTiming(context, timing, bad).isEmpty());
+            QFile wave(musicPath);
+            REQUIRE(wave.open(QIODevice::Append));
+            wave.write("changed");
+            wave.close();
+            REQUIRE_FALSE(adapter.applyTiming(context, timing, proposal).isEmpty());
+            REQUIRE(stack->count() == 0);
+            REQUIRE(timeline->getClipPlaytime(ids[0]) == shot);
+        }
+        SECTION("Native partial resize is restored when the following batch step fails")
+        {
+            int calls = 0;
+            const auto result = Montaz::applyInsertBatch(
+                QJsonArray{QJsonObject{}, QJsonObject{}},
+                [&](const QJsonObject &, Fun &batchUndo, Fun &batchRedo) {
+                    if (++calls == 2) return false;
+                    int duration = 1;
+                    return timeline->requestItemResize(ids[0], duration, true, true, batchUndo, batchRedo);
+                },
+                [](const Fun &, const Fun &) { FAIL("A failed timing batch must not commit"); });
+            REQUIRE(result == QStringLiteral("apply_failed_rolled_back"));
+            REQUIRE(timeline->getClipPlaytime(ids[0]) == shot);
+            REQUIRE(timeline->getClipIn(ids[0]) == 5);
+            REQUIRE(stack->count() == 0);
+            REQUIRE(timeline->checkConsistency());
+        }
+        SECTION("Lock changes and manual gaps invalidate the review")
+        {
+            timeline->setTrackLockedState(video, true);
+            timeline->setTrackLockedState(video, false);
+            REQUIRE_FALSE(adapter.applyTiming(context, timing, proposal).isEmpty());
+            REQUIRE(timeline->requestItemResize(ids[0], shot - 1, true) == shot - 1);
+            REQUIRE(adapter.timingRequest().isEmpty());
+        }
+        stack->clear();
     }
     pCore->taskManager.slotCancelJobs();
     document.closing = true;

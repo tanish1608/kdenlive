@@ -23,6 +23,7 @@ public:
 Q_SIGNALS:
     void busyChanged(bool busy);
     void soundtrackReady(const QJsonObject &soundtrack);
+    void timingReady(const QJsonObject &proposal);
     void proposalReady(const QJsonObject &proposal);
     void eventReceived(const QJsonObject &event);
     void failed(const QString &code);
@@ -43,6 +44,8 @@ private:
     QJsonObject m_proposal;
     QJsonObject m_review;
     QJsonObject m_musicSpec;
+    QJsonObject m_timingSpec;
+    bool m_timingRequest{false};
     QJsonObject m_soundtrack;
     bool m_musicRequest{false};
     int m_musicPhase{0};

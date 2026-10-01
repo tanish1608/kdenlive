@@ -11,6 +11,7 @@ from .contracts import InsertClip, Proposal, ProposalError, validate_proposal
 from .gemini import AssistantError, Gemini
 from .lifecycle import Run, Status
 from .music import ElevenLabs, compose_music
+from .timing import refine_timing
 from .planning import MediaTools, brief_from_wire, plan_media
 from .protocol import (
     MAX_MESSAGE_BYTES,
@@ -95,14 +96,21 @@ def main() -> int:
         keys = {"version", "type", "request_id", "snapshot"}
         real = request.get("type") == "plan_media"
         musical = request.get("type") == "compose_music"
+        timing = request.get("type") == "refine_timing"
         fields(
             request,
-            keys | {"music"} if musical else keys | {"sources", "brief"} if real else keys,
+            keys | {"timing"}
+            if timing
+            else keys | {"music"}
+            if musical
+            else keys | {"sources", "brief"}
+            if real
+            else keys,
         )
         if (
             type(request["version"]) is not int
             or request["version"] != 1
-            or request["type"] not in {"plan_demo", "plan_media", "compose_music"}
+            or request["type"] not in {"plan_demo", "plan_media", "compose_music", "refine_timing"}
         ):
             raise ProposalError("Unsupported request")
         # Validate request IDs through the same typed proposal constructor.
@@ -110,12 +118,14 @@ def main() -> int:
         request_id = request["request_id"]
         if type(request_id) is not str or not request_id or len(request_id) > 128:
             raise ProposalError("Invalid request ID")
-        stage = "music" if musical else "planner"
+        stage = "timing" if timing else "music" if musical else "planner"
         run = Run(request_id, (stage,))
         send_event(run.events[-1])
         run.transition(stage, Status.RUNNING)
         send_event(run.events[-1])
-        if musical:
+        if timing:
+            proposal = refine_timing(snapshot, request_id, request["timing"], media)
+        elif musical:
             provider = ElevenLabs.configured()
 
             def music_progress(phase, cached):
@@ -160,7 +170,9 @@ def main() -> int:
         run.finish()
         send_event(run.events[-1])
         message = (
-            {"version": 1, "type": "soundtrack", "soundtrack": soundtrack}
+            {"version": 1, "type": "timing", "proposal": proposal}
+            if timing
+            else {"version": 1, "type": "soundtrack", "soundtrack": soundtrack}
             if musical
             else {"version": 1, "type": "proposal", "proposal": to_wire(proposal)}
         )

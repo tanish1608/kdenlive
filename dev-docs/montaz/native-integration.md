@@ -11,8 +11,9 @@ sampled observations, previews source windows and appends approved cuts to an
 unlocked video track. See `assistant/README.md` for sampling and provider limits.
 The deterministic six-source diagnostic remains available by setting
 `MONTAZ_ASSISTANT_DEMO=1`; it appends each source's first two seconds.
-Audio, captions, transitions, generators, and nested sequences are outside this
-first slice. Only the deterministic diagnostic runs without provider credentials.
+ElevenLabs instrumentals and local music-accent cut refinement extend this slice.
+Captions, transitions, generators and nested sequences remain outside it. The
+deterministic diagnostic and existing-music timing run without provider credentials.
 
 The editor adapter captures the actual bin/sequence, uses a monotonically
 increasing revision, rejects stale/replayed proposals, and revalidates source
@@ -137,3 +138,26 @@ export retains all 474 decoded video frames from the silent draft and measures
 -18.1 LUFS / -5.0 dBFS true peak. See [quality review](quality-review.md) for the
 real MP3 duration failure and local reuse correction. This does not verify musical
 cut alignment, ducking, sound effects or narration; those remain pending.
+
+
+The local timing milestone passes **83 Python checks**, **26 Qt transport checks**
+and **7 chat checks** (including fixtures), plus native `assistanttest`. Protocol-v2
+retiming checks preserve identities, source starts, order and total span, reject
+changed music/source ranges and stale context, and limit boundary shifts to one
+quarter second. Synthetic checks exercise actual FFmpeg music measurement without
+credentials, globally constrained neighboring lengths, terminal no-change, malformed
+responses, dirty exits and forced Stop. Native tests resize/move real clips, verify
+one Undo/Redo and replay rejection, and roll back a native resize after an injected
+batch failure. This is a rollback test of the shared batch helper; it does not
+inject failures at every step of the adapter.
+
+Timing accepts only a contiguous normal-speed video track and one whole-span
+assistant instrumental, with no groups, clip effects, transitions, subtitles or
+other audio. It measures energy accents locally with a 30-second request deadline.
+No useful shift terminates as No change. Native Apply rechecks eligibility and the
+file checksum; it never overwrites the live project file. Musical beat/phrase
+verification and sound effects remain pending.
+
+The live Goa review proposed only frame 75 → 79 and exercised Apply and one Undo.
+Redo, refined-state save/reopen, cut seeking and native export remain pending
+because the Mac locked during review. See [quality review](quality-review.md).

@@ -7,6 +7,8 @@
 #include <QString>
 
 namespace Montaz {
+QString validateTimingRequest(const QJsonObject &snapshot, const QJsonObject &timing);
+QString validateTimingProposal(const QJsonObject &snapshot, const QJsonObject &timing, const QJsonObject &proposal);
 QString validateMusicRequest(const QJsonObject &snapshot, const QJsonObject &music);
 QString validateSoundtrack(const QJsonObject &snapshot, const QJsonObject &music, const QJsonObject &soundtrack);
 QString validateEditorialReview(const QJsonObject &snapshot, const QJsonObject &proposal, const QJsonObject &review);

@@ -4,11 +4,13 @@
 #include "editbatch.h"
 #include "proposal.h"
 
+#include "bin/model/subtitlemodel.hpp"
 #include "bin/projectclip.h"
 #include "bin/projectitemmodel.h"
 #include "core.h"
 #include "doc/docundostack.hpp"
 #include "doc/kdenlivedoc.h"
+#include "effects/effectstack/model/effectstackmodel.hpp"
 #include "project/projectmanager.h"
 #include "timeline2/model/timelineitemmodel.hpp"
 
@@ -230,6 +232,7 @@ QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const
         producer->get_playtime() < length)
         return QStringLiteral("invalid_soundtrack");
     producer->set("kdenlive:clipname", i18n("Assistant music").toUtf8().constData());
+    producer->set("kdenlive:montaz_role", "music");
     UndoFunction undo = []() { return true; }, redo = []() { return true; };
     QString binId;
     const auto bin = pCore->projectItemModel();
@@ -247,4 +250,98 @@ QString Montaz::EditorAdapter::applySoundtrack(const QJsonObject &context, const
     m_appliedRequests.insert(request);
     invalidate();
     return {};
+}
+
+QJsonObject Montaz::EditorAdapter::timingRequest()
+{
+    const auto current = snapshot();
+    const auto timeline = m_timeline.lock();
+    if (current.isEmpty() || !timeline || timeline->getCompositionsCount() || (timeline->getSubtitleModel() && timeline->getSubtitleModel()->rowCount() > 0))
+        return {};
+    QJsonArray clips;
+    std::vector<QJsonObject> visuals;
+    QJsonObject music;
+    for (const auto value : current.value(QStringLiteral("occupied")).toArray()) {
+        const auto item = value.toObject();
+        const int id = item.value(QStringLiteral("instance_id")).toString().toInt();
+        if (timeline->isInGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 || timeline->getClipSpeed(id) != 1.0 ||
+            timeline->getClipEffectStackModel(id)->rowCount() > 0)
+            return {};
+        const auto binId = timeline->getClipBinId(id);
+        const auto asset = pCore->projectItemModel()->getClipByBinID(binId);
+        if (!asset) return {};
+        if (timeline->isAudioTrack(item.value(QStringLiteral("track_id")).toString().toInt())) {
+            const QFileInfo path(asset->clipUrl());
+            // Accept the role marker or legacy assistant music assets created before it.
+            if (!music.isEmpty() || timeline->getClipIn(id) != 0 || path.suffix() != QStringLiteral("wav") ||
+                (asset->getProducerProperty(QStringLiteral("kdenlive:montaz_role")) != QStringLiteral("music") &&
+                 !path.absolutePath().endsWith(QStringLiteral(".assets/music"))))
+                return {};
+            QFile file(path.absoluteFilePath());
+            if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024) return {};
+            QCryptographicHash digest(QCryptographicHash::Sha256);
+            if (!digest.addData(&file)) return {};
+            music = {{QStringLiteral("path"), path.absoluteFilePath()},
+                     {QStringLiteral("sha256"), QString::fromLatin1(digest.result().toHex())},
+                     {QStringLiteral("instance_id"), QString::number(id)}};
+        } else {
+            if (timeline->getClipState(id).first != PlaylistState::VideoOnly) return {};
+            auto clip = item;
+            clip[QStringLiteral("bin_id")] = binId;
+            clip[QStringLiteral("in_frame")] = timeline->getClipIn(id);
+            visuals.push_back(clip);
+        }
+    }
+    std::sort(visuals.begin(), visuals.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        return a.value(QStringLiteral("start_frame")).toInt() < b.value(QStringLiteral("start_frame")).toInt();
+    });
+    for (const auto &clip : visuals)
+        clips.append(clip);
+    const auto fps = pCore->getProjectFpsInfo();
+    const QJsonObject timing{{QStringLiteral("clips"), clips},
+                             {QStringLiteral("music"), music},
+                             {QStringLiteral("max_shift_frames"), qMax(1, int(qint64(fps.first) / (4 * qint64(fps.second))))}};
+    return validateTimingRequest(current, timing).isEmpty() ? timing : QJsonObject{};
+}
+
+QString Montaz::EditorAdapter::applyTiming(const QJsonObject &context, const QJsonObject &timing, const QJsonObject &proposal)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot() != context || timingRequest() != timing || !validateTimingProposal(context, timing, proposal).isEmpty())
+        return QStringLiteral("invalid_timing_proposal");
+    const auto request = proposal.value(QStringLiteral("request_id")).toString();
+    if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
+    const auto timeline = m_timeline.lock();
+    const auto originals = timing.value(QStringLiteral("clips")).toArray();
+    const auto operations = proposal.value(QStringLiteral("operations")).toArray();
+    QJsonArray changed, steps;
+    for (int i = 0; i < operations.size(); ++i)
+        if (operations[i] != originals[i]) changed.append(operations[i]);
+    // Temporarily shorten only affected clips to avoid native collision handling
+    // altering neighbors. Retain their IDs, source in-points, and native metadata.
+    for (const auto &action : {QStringLiteral("shrink"), QStringLiteral("move"), QStringLiteral("grow")})
+        for (const auto value : changed) {
+            auto step = value.toObject();
+            step[QStringLiteral("action")] = action;
+            steps.append(step);
+        }
+    const auto result = applyInsertBatch(
+        steps,
+        [timeline](const QJsonObject &step, UndoFunction &undo, UndoFunction &redo) {
+            const int id = step.value(QStringLiteral("instance_id")).toString().toInt();
+            const auto action = step.value(QStringLiteral("action")).toString();
+            if (action == QStringLiteral("move"))
+                return timeline->requestClipMove(id, step.value(QStringLiteral("track_id")).toString().toInt(),
+                                                 step.value(QStringLiteral("start_frame")).toInt(), false, true, true, true, undo,
+                                                 redo) == TimelineModel::MoveSuccess;
+            const int requested = action == QStringLiteral("shrink") ? 1 : step.value(QStringLiteral("duration_frames")).toInt();
+            int length = requested;
+            return timeline->requestItemResize(id, length, true, true, undo, redo) && length == requested &&
+                   timeline->getClipIn(id) == step.value(QStringLiteral("in_frame")).toInt();
+        },
+        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Align cuts to music accents")); });
+    if (result.isEmpty()) m_appliedRequests.insert(request);
+    if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
+    invalidate();
+    return result;
 }

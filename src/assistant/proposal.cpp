@@ -267,3 +267,115 @@ QString Montaz::validateSoundtrack(const QJsonObject &snapshot, const QJsonObjec
     }
     return {};
 }
+
+QString Montaz::validateTimingRequest(const QJsonObject &snapshot, const QJsonObject &timing)
+{
+    const auto music = timing.value(QStringLiteral("music")).toObject();
+    const auto path = music.value(QStringLiteral("path")).toString();
+    const auto clips = timing.value(QStringLiteral("clips")).toArray();
+    if (!validateSnapshot(snapshot).isEmpty() || !fields(timing, {QStringLiteral("clips"), QStringLiteral("music"), QStringLiteral("max_shift_frames")}) ||
+        !fields(music, {QStringLiteral("path"), QStringLiteral("sha256"), QStringLiteral("instance_id")}) || path.size() > 4096 ||
+        !QFileInfo(path).isAbsolute() || QFileInfo(path).suffix() != QStringLiteral("wav") || !identifier(music.value(QStringLiteral("instance_id"))) ||
+        !QRegularExpression(QStringLiteral("^[a-f0-9]{64}$")).match(music.value(QStringLiteral("sha256")).toString()).hasMatch() ||
+        !timing.value(QStringLiteral("clips")).isArray() || clips.size() < 2 || clips.size() > 256 ||
+        !integer(timing.value(QStringLiteral("max_shift_frames")), 1))
+        return invalid();
+    const auto rate = snapshot.value(QStringLiteral("frame_rate")).toObject();
+    const qint64 num = rate.value(QStringLiteral("numerator")).toInteger(), den = rate.value(QStringLiteral("denominator")).toInteger();
+    if (timing.value(QStringLiteral("max_shift_frames")).toInteger() != qMax(qint64(1), num / (4 * den))) return invalid();
+    QMap<QString, QJsonObject> assets, tracks, occupied;
+    for (const auto value : snapshot.value(QStringLiteral("assets")).toArray())
+        assets[value.toObject().value(QStringLiteral("bin_id")).toString()] = value.toObject();
+    for (const auto value : snapshot.value(QStringLiteral("tracks")).toArray())
+        tracks[value.toObject().value(QStringLiteral("track_id")).toString()] = value.toObject();
+    for (const auto value : snapshot.value(QStringLiteral("occupied")).toArray())
+        occupied[value.toObject().value(QStringLiteral("instance_id")).toString()] = value.toObject();
+    QSet<QString> seen;
+    QString trackId;
+    qint64 previous = -1;
+    for (const auto value : clips) {
+        const auto c = value.toObject();
+        const auto id = c.value(QStringLiteral("instance_id")).toString();
+        const auto asset = assets.value(c.value(QStringLiteral("bin_id")).toString());
+        const auto track = tracks.value(c.value(QStringLiteral("track_id")).toString());
+        const auto item = occupied.value(id);
+        const qint64 start = c.value(QStringLiteral("start_frame")).toInteger(), length = c.value(QStringLiteral("duration_frames")).toInteger();
+        if (!fields(c, {QStringLiteral("instance_id"), QStringLiteral("bin_id"), QStringLiteral("track_id"), QStringLiteral("start_frame"),
+                        QStringLiteral("in_frame"), QStringLiteral("duration_frames")}) ||
+            !identifier(c.value(QStringLiteral("instance_id"))) || !range(c, QStringLiteral("start_frame")) || !range(c, QStringLiteral("in_frame")) ||
+            !asset.value(QStringLiteral("has_video")).toBool() || track.value(QStringLiteral("kind")) != QStringLiteral("video") ||
+            track.value(QStringLiteral("locked")).toBool() || length < (num + den - 1) / den ||
+            c.value(QStringLiteral("in_frame")).toInteger() + length > asset.value(QStringLiteral("duration_frames")).toInteger() ||
+            item.value(QStringLiteral("track_id")) != c.value(QStringLiteral("track_id")) ||
+            item.value(QStringLiteral("start_frame")) != c.value(QStringLiteral("start_frame")) ||
+            item.value(QStringLiteral("duration_frames")) != c.value(QStringLiteral("duration_frames")) || seen.contains(id) ||
+            (previous >= 0 && previous != start) || (!trackId.isEmpty() && trackId != c.value(QStringLiteral("track_id")).toString()))
+            return invalid();
+        trackId = c.value(QStringLiteral("track_id")).toString();
+        previous = start + length;
+        seen.insert(id);
+    }
+    const auto audio = occupied.value(music.value(QStringLiteral("instance_id")).toString());
+    const qint64 length = audio.value(QStringLiteral("duration_frames")).toInteger();
+    if (audio.isEmpty() || tracks.value(audio.value(QStringLiteral("track_id")).toString()).value(QStringLiteral("kind")) != QStringLiteral("audio") ||
+        audio.value(QStringLiteral("start_frame")) != clips.first().toObject().value(QStringLiteral("start_frame")) ||
+        audio.value(QStringLiteral("start_frame")).toInteger() + length != previous || length * den < 3 * num || length * den > 600 * num)
+        return invalid();
+    seen.insert(music.value(QStringLiteral("instance_id")).toString());
+    return seen.size() == occupied.size() ? QString() : invalid();
+}
+
+QString Montaz::validateTimingProposal(const QJsonObject &snapshot, const QJsonObject &timing, const QJsonObject &proposal)
+{
+    if (!validateTimingRequest(snapshot, timing).isEmpty() ||
+        !fields(proposal, {QStringLiteral("request_id"), QStringLiteral("project_id"), QStringLiteral("sequence_id"), QStringLiteral("base_revision"),
+                           QStringLiteral("frame_rate"), QStringLiteral("protocol_version"), QStringLiteral("music_sha256"), QStringLiteral("accents"),
+                           QStringLiteral("operations")}) ||
+        !identifier(proposal.value(QStringLiteral("request_id"))) ||
+        proposal.value(QStringLiteral("project_id")) != snapshot.value(QStringLiteral("project_id")) ||
+        proposal.value(QStringLiteral("sequence_id")) != snapshot.value(QStringLiteral("sequence_id")) ||
+        proposal.value(QStringLiteral("base_revision")) != snapshot.value(QStringLiteral("revision")) ||
+        proposal.value(QStringLiteral("frame_rate")) != snapshot.value(QStringLiteral("frame_rate")) ||
+        proposal.value(QStringLiteral("protocol_version")) != 2 ||
+        proposal.value(QStringLiteral("music_sha256")) != timing.value(QStringLiteral("music")).toObject().value(QStringLiteral("sha256")) ||
+        !proposal.value(QStringLiteral("accents")).isArray() || !proposal.value(QStringLiteral("operations")).isArray())
+        return invalid();
+    const auto originals = timing.value(QStringLiteral("clips")).toArray(), operations = proposal.value(QStringLiteral("operations")).toArray();
+    const auto first = originals.first().toObject().value(QStringLiteral("start_frame")).toInteger();
+    const auto last = originals.last().toObject();
+    const auto end = last.value(QStringLiteral("start_frame")).toInteger() + last.value(QStringLiteral("duration_frames")).toInteger();
+    QSet<qint64> accents;
+    qint64 previous = 0;
+    for (const auto value : proposal.value(QStringLiteral("accents")).toArray()) {
+        if (!integer(value, 1) || value.toInteger() <= previous || value.toInteger() >= end - first || accents.size() >= 128) return invalid();
+        previous = value.toInteger();
+        accents.insert(first + previous);
+    }
+    if (operations.size() != originals.size()) return invalid();
+    auto candidate = timing;
+    candidate[QStringLiteral("clips")] = operations;
+    // Validate the new clips against their own occupancy while retaining native source bounds.
+    auto changedSnapshot = snapshot;
+    QJsonArray ranges;
+    for (const auto value : snapshot.value(QStringLiteral("occupied")).toArray())
+        if (value.toObject().value(QStringLiteral("instance_id")) == timing.value(QStringLiteral("music")).toObject().value(QStringLiteral("instance_id")))
+            ranges.append(value);
+    bool changed = false;
+    for (int i = 0; i < operations.size(); ++i) {
+        auto op = operations[i].toObject();
+        const auto original = originals[i].toObject();
+        if (!range(op, QStringLiteral("start_frame"))) return invalid();
+        for (const auto &key : {QStringLiteral("instance_id"), QStringLiteral("bin_id"), QStringLiteral("track_id"), QStringLiteral("in_frame")})
+            if (op.value(key) != original.value(key)) return invalid();
+        const auto start = op.value(QStringLiteral("start_frame")).toInteger(), old = original.value(QStringLiteral("start_frame")).toInteger();
+        if (qAbs(start - old) > timing.value(QStringLiteral("max_shift_frames")).toInteger() || (i == 0 && start != first) ||
+            (start != old && !accents.contains(start)))
+            return invalid();
+        changed |= op != original;
+        op.remove(QStringLiteral("bin_id"));
+        op.remove(QStringLiteral("in_frame"));
+        ranges.append(op);
+    }
+    changedSnapshot[QStringLiteral("occupied")] = ranges;
+    return changed ? validateTimingRequest(changedSnapshot, candidate) : invalid();
+}

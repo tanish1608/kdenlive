@@ -76,6 +76,53 @@ QJsonObject soundtrack()
     return value;
 }
 
+QJsonObject timingSpec()
+{
+    QJsonArray clips;
+    for (int i = 0; i < 3; ++i)
+        clips.append(QJsonObject{{"instance_id", QStringLiteral("shot%1").arg(i)},
+                                 {"bin_id", QString::number(i + 1)},
+                                 {"track_id", "1"},
+                                 {"in_frame", 0},
+                                 {"start_frame", i * 60},
+                                 {"duration_frames", 60}});
+    return {{"clips", clips},
+            {"max_shift_frames", 7},
+            {"music", QJsonObject{{"instance_id", "music"}, {"path", "/private/music.wav"}, {"sha256", QString(64, 'a')}}}};
+}
+
+QJsonObject timingSnapshot()
+{
+    auto value = snapshot();
+    QJsonArray occupied;
+    for (const auto item : timingSpec()["clips"].toArray()) {
+        auto clip = item.toObject();
+        clip.remove("bin_id");
+        clip.remove("in_frame");
+        occupied.append(clip);
+    }
+    occupied.append(QJsonObject{{"instance_id", "music"}, {"track_id", "2"}, {"start_frame", 0}, {"duration_frames", 180}});
+    value["occupied"] = occupied;
+    return value;
+}
+
+QJsonObject timingProposal()
+{
+    auto value = proposal();
+    value["protocol_version"] = 2;
+    value["music_sha256"] = QString(64, 'a');
+    value["accents"] = QJsonArray{64, 116};
+    auto operations = timingSpec()["clips"].toArray();
+    for (int i = 0; i < 3; ++i) {
+        auto op = operations[i].toObject();
+        op["start_frame"] = i == 0 ? 0 : i == 1 ? 64 : 116;
+        op["duration_frames"] = i == 1 ? 52 : 64;
+        operations[i] = op;
+    }
+    value["operations"] = operations;
+    return value;
+}
+
 void fakeWorker(const QString &path, const QByteArray &script)
 {
     QVERIFY(QDir().mkpath(path + QStringLiteral("/montaz_assistant")));
@@ -99,6 +146,67 @@ private Q_SLOTS:
     {
         QVERIFY(Montaz::validateProposal(snapshot(), proposal()).isEmpty());
         QCOMPARE(Montaz::validateProposal(snapshot(), proposal(), {QStringLiteral("request")}), QStringLiteral("already_applied"));
+    }
+    void timingPreservesSourceIdentityTotalLengthAndFrameBounds()
+    {
+        QVERIFY(Montaz::validateTimingRequest(timingSnapshot(), timingSpec()).isEmpty());
+        QVERIFY(Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), timingProposal()).isEmpty());
+        for (const auto &change : {QJsonObject{{"in_frame", 1}}, QJsonObject{{"start_frame", 8}}, QJsonObject{{"duration_frames", 59}},
+                                   QJsonObject{{"duration_frames", true}}, QJsonObject{{"start_frame", 2147483648.0}}, QJsonObject{{"bin_id", "2"}}}) {
+            auto value = timingProposal();
+            auto operations = value["operations"].toArray();
+            auto op = operations[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                op[it.key()] = it.value();
+            operations[0] = op;
+            value["operations"] = operations;
+            QVERIFY(!Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), value).isEmpty());
+        }
+        for (const auto &change : {QJsonObject{{"music_sha256", QString(64, 'b')}}, QJsonObject{{"base_revision", 3}},
+                                   QJsonObject{{"accents", QJsonArray{63, 116}}}, QJsonObject{{"protocol_version", 1}}}) {
+            auto value = timingProposal();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                value[it.key()] = it.value();
+            QVERIFY(!Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), value).isEmpty());
+        }
+    }
+    void timingRequiresValidatedResultsAndCleanExitAndSupportsStop()
+    {
+        const QByteArray script = R"PY(import json,sys,signal,time
+r=json.loads(sys.stdin.readline())
+def send(x): print(json.dumps({'version':1,**x}),flush=True)
+send({'type':'ready'})
+FAULT
+for n,status in enumerate(('running','running','completed','completed'),1):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n in (1,4) else 'timing','status':status,'reason':''})
+s=r['snapshot']; t=r['timing']; ops=t['clips']
+for i,o in enumerate(ops):
+    o['start_frame']=[0,64,116][i];o['duration_frames']=[64,52,64][i]
+p=dict(request_id=r['request_id'],project_id=s['project_id'],sequence_id=s['sequence_id'],base_revision=s['revision'],frame_rate=s['frame_rate'],protocol_version=2,music_sha256=t['music']['sha256'],accents=[64,116],operations=ops)
+CHANGE
+send({'type':'timing','proposal':p})
+EXIT
+)PY";
+        for (int fault = 0; fault < 4; ++fault) {
+            auto worker = script;
+            worker.replace("FAULT", fault == 3 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)" : "pass");
+            worker.replace("CHANGE", fault == 1 ? "p['operations'][0]['in_frame']=1" : "pass");
+            worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::timingReady), failures(&client, &Montaz::WorkerClient::failed),
+                stopped(&client, &Montaz::WorkerClient::stopped);
+            QVERIFY(client.start(timingSnapshot(), {{"timing", timingSpec()}}));
+            if (fault == 3) {
+                QTest::qWait(100);
+                client.stop();
+            }
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
+            QCOMPARE(failures.count(), fault > 0 && fault != 3 ? 1 : 0);
+            QCOMPARE(stopped.count(), fault == 3 ? 1 : 0);
+        }
     }
     void musicIsBoundToTheIssuedPathSpanTrackAndRevision()
     {

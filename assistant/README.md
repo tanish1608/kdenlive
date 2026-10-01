@@ -115,8 +115,31 @@ opening/ending fades baked into the WAV. Native gain remains editable. Validatio
 rejects silence and output more than one project frame short. MP3 block rounding
 may leave a smaller gap; only that final gap is padded before fading, never
 stretched. Prepared WAV duration matches the timeline within one sample. Energy accents are
-measured in project frames; they are not verified beats and do not move cuts.
+measured in project frames; they are not verified beats. Adding music keeps cuts
+unchanged; the separate Align cuts review can propose bounded shifts.
 Music preview uses Qt audio; Kdenlive remains the timeline playback authority.
+
+## Local cut timing
+
+With assistant music on the timeline, **Align cuts** proposes small changes to
+existing cut points using measured energy accents. It runs locally and makes no
+provider calls. Review the before/after cut times, then **Apply timing**. One
+native Undo restores the original cuts; music, shot order, source in-points and
+the overall video span stay unchanged. Native clip IDs and bin assets are retained.
+
+The first version requires one contiguous video track, at least two shots, one
+assistant instrumental covering the edit, and shots lasting at least one second.
+Grouped clips, other audio, effects, speed changes, transitions and subtitles are
+ineligible. Each internal boundary can move at most one quarter second, rounded
+down to project frames (minimum one frame). Source length limits and neighboring
+shot durations can prevent a shift. No useful change is a terminal outcome.
+Accents are not verified beats or musical phrases; review the result in playback.
+
+`refine_timing` returns a separate protocol-v2 retiming proposal. Both validators
+enforce the editor-issued clip identities, source starts, frame limits, matching
+music checksum and unchanged total span. Apply rechecks native eligibility and
+the audio checksum, then accumulates native resize/move undo functions in one
+batch. Only affected clips are touched; a failed step rolls back the batch.
 
 Compile and exercise the actual Qt process transport, native validator, and
 batch rollback logic using an installed Qt development environment:

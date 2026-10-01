@@ -77,3 +77,25 @@ because of AAC framing. All 474 decoded video frames match the prior silent
 export exactly. Exported audio measures **-18.1 LUFS** integrated and **-5.0 dBFS**
 true peak. This is a soundtrack integration check; portrait framing,
 automatic musical cut timing, environmental audio/ducking and effects remain open.
+
+
+## Local timing checkpoint
+
+A separate `goa-timing-review.kdenlive` was opened from the music review. Local
+analysis proposed one internal cut shift: frame **75 → 79** (four frames, about
+0.13 seconds at 30000/1001 FPS). All later boundaries, source starts, shot order,
+474-frame total and music placement stay unchanged. Other cuts either already
+match an accent, lack a nearby accent or cannot extend into available source.
+The candidate is an energy accent, not a verified beat or phrase boundary.
+
+Native Apply completed and one Undo restored the original cut ranges. The project
+was saved in that restored state. Desktop access then became blocked by the Mac
+lock screen. **Real Goa Redo, save/reopen of the refined state, cut seeking and
+export review remain pending.** Do not describe this as a verified improvement
+to the exported film. No new provider call was made during timing analysis.
+
+83 Python checks, 26 Qt transport checks and 7 chat checks (including fixtures),
+plus native `assistanttest`, pass. The native synthetic test verifies actual
+resize/move, one Undo/Redo, stable identities/source starts, replay rejection,
+stale locks and rollback after an injected batch failure. Those checks establish
+mutation safety; they do not assess musical or visual taste.

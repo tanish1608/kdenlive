@@ -45,6 +45,10 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   settings, raw/prepared reuse, exact timeline duration, loudness/edge preparation,
   Listen/Stop and one native undoable import/insertion. The Goa music export keeps
   all 474 decoded visual frames unchanged and measures -18.1 LUFS / -5.0 dBFS.
+- Local **Align cuts** proposes bounded shifts to existing music energy accents.
+  It preserves shot order, source starts, clip IDs, music and total span; reviewed
+  changes use native resize/move operations and one Undo. Complex timelines are
+  ineligible. Accents are not verified beats or phrases.
 - Still pending: deferred portrait framing, additional native failure checks,
   narration, audio pairing/ducking, effects, beat-aligned cuts, subtitle styling,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;

@@ -78,8 +78,11 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    native audio insertion and gain/fades. Stop and errors must cleanly terminate.
    Instrumental generation, raw/prepared reuse, preview and native undoable
    import/insertion are implemented. The Goa music export retains all 474 decoded
-   visual frames and measures -18.1 LUFS / -5.0 dBFS true peak. Effects, beat/phrase
-   alignment, ducking and native fade-effect proposals remain pending.
+   visual frames and measures -18.1 LUFS / -5.0 dBFS true peak. Local energy-accent
+   cut proposals and native undoable retiming are implemented; each boundary shift
+   is limited to one quarter second and available source length. These are not
+   verified beat/phrase boundaries. Effects, beat/phrase analysis, ducking and
+   native fade-effect proposals remain pending.
 3. **Narration and captions:** separately cached speech evidence, per-project mode,
    native subtitle styles. Silent footage must skip speech-only jobs. Test style
    switching without subtitle duplication or timing drift.
