@@ -54,8 +54,14 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   undoable audio insertion. Its **Suggest sounds** action reuses cached visual
   observations for sparse reviewed foley cues, followed by separate selected
   generation. This is not audio-event recognition.
+- **Captions** recognizes bounded original timeline audio, skips silence, caches
+  speech separately, and applies reviewed native subtitles. Clean/Bold/Original
+  presets preserve event text and timing. Word alignment remains pending.
+- A visual draft receives one cached-observation quality review before Apply.
+  One revision preserves total frames and passes the original source/recipe
+  checks; failed review remains explicitly unavailable, never approval.
 - Still pending: deferred portrait framing, additional native failure checks,
-  narration, audio pairing/ducking, beat-aligned cuts, subtitle styling,
+  narration, audio pairing/ducking, beat-aligned cuts, word alignment,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;
   passing integration checks does not make it a finished travel film.
 - See [native integration](native-integration.md) for exact verification limits.

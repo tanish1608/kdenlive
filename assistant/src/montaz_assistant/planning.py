@@ -572,8 +572,17 @@ def plan_media(
     media.check()
     try:
         proposal = proposal_from_plan(snapshot, request_id, raw, evidence, brief)
+        # Import here to keep the reviewer on the same validated plan contract.
+        from .editorial import review_draft
+
+        progress("reviewing", len(assets), cached, len(assets))
+        raw, assessment = review_draft(
+            snapshot, request_id, raw, evidence, brief, provider, media
+        )
+        proposal = proposal_from_plan(snapshot, request_id, raw, evidence, brief)
         review(
             {
+                "assessment": assessment,
                 "requested_frames": snapshot.frame_rate.seconds_to_frame(
                     str(brief["duration_seconds"])
                 ),

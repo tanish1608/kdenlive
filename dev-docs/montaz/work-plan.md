@@ -98,8 +98,15 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    save/reopen and desktop/command-line exports. Headless subtitle loading no
    longer dereferences an absent main window. Word alignment, narration generation,
    processed/overlapping audio and per-project dialogue modes remain pending.
-4. **Quality review:** one bounded revision, honest unavailable/failed states,
-   mixed-media regressions and exported output review. Publication comes later.
+4. **Quality review — first draft iteration:** one cached-observation model
+   review, at most one same-duration revision, strict original plan validation,
+   explicit unavailable states and bounded Stop/deadlines are implemented.
+   Offline tests cover failed/invalid reviews, cancellation, native progress and
+   privacy. Controlled cached-Goa planning/review succeeded. Desktop inspection
+   reproduced the known macOS accessibility crash; successful desktop review/
+   Apply/export remains an open gate. Finished-sequence replacement, mixed-media
+   perceptual review and measured quality comparison remain pending. Publication
+   comes later.
 
 **Deferred by the user:** portrait framing. Later add explicit project orientation
 and native framing proposals for mixed portrait/landscape; preserve manual framing

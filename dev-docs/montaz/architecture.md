@@ -125,6 +125,20 @@ native validation binds its shot identities and durations to the proposal. The U
 shows reasons, usable duration and excluded sources; run logs keep only numeric
 metrics. It has no authority to change the edit contract.
 
+`editorial.py` now reviews each validated visual draft once against the existing
+observations. Its single text request returns keep or one revised shot plan.
+Revisions reuse `proposal_from_plan`, preserving all source/recipe constraints
+and the original total duration. Review cannot modify an already applied edit.
+Oversized context skips review; provider/parse/invalid-revision failures explicitly
+retain an unreviewed original draft. Cancellation never takes that fallback.
+
+Strict native review metadata distinguishes kept/revised/unavailable with bounded
+reasons and allowlisted diagnostic codes. Ordered analysis/planning/reviewing
+progress and a clean exit are required before Apply. Entering reviewing starts
+a 45-second native cap without extending the run deadline; a forced timeout fails
+the run. Only status/code are
+logged. No recursive critic, reanalysis or automatic revision retry is present.
+
 ## Runs and cancellation
 
 Each run has a run ID; each event has an increasing sequence number and explicit

@@ -211,3 +211,29 @@ Approximate recognition timing is editable, not forced word alignment. Narration
 ducking and one bounded editorial revision remain open. The known Qt/macOS
 accessibility inspection crash remains unresolved. Portrait framing and
 packaging/publication remain deferred.
+
+## Bounded draft quality review — October 1, 2026
+
+Each validated visual plan now receives one Gemini text review using its existing
+observations. It may keep the draft or propose one complete revision, preserving
+total frames and passing the original source/recipe checks. There is no reanalysis,
+critic loop or automatic retry. Failed/oversized review is explicitly unavailable;
+the original source-valid draft remains unreviewed and requires manual inspection.
+Stop discards late results. Native review is capped at 45 seconds within the
+existing three-minute run deadline; logs keep only outcome/code.
+
+127 Python, 34 Qt transport and 7 chat checks pass; the native editor rebuild and
+`assistanttest` pass. Controlled real planning on five cache-matching Goa sources
+returned four shots / 193 frames at 30000/1001 FPS and a kept review in 7.70 seconds.
+A second real native Qt/Python transport run reused those five entries, returned
+the same shot count/span, passed strict metadata/progress checks and exited cleanly
+in 14.32 seconds. Different briefs/runtimes make these observed timings, not a
+controlled performance or quality comparison.
+
+The separate desktop project adds an empty test sequence, preserving earlier
+edits. Its full-bin run failed during Gemini analysis before review. Subsequent
+inspection reproduced the macOS accessibility crash; the crash stack starts in
+`NSAccessibilityAttributeAccessorInfo` and AX hierarchy traversal. Successful new
+desktop review/Apply/export remains unverified. No revised travel film is claimed.
+Finished-sequence replacement, narration/ducking and perceptual comparison remain
+pending; portrait framing and packaging/publication stay deferred.

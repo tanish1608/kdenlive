@@ -86,6 +86,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_musicPhase = 0;
     m_musicSpec = context.value(m_effectRequest ? QStringLiteral("effect") : QStringLiteral("music")).toObject();
     m_planningProgressReceived = false;
+    m_reviewingProgressReceived = false;
     m_progressCompleted = m_progressCached = 0;
     QJsonObject request{{QStringLiteral("version"), 1},
                         {QStringLiteral("type"), m_captionRequest  ? QStringLiteral("propose_captions")
@@ -228,7 +229,7 @@ void Montaz::WorkerClient::readOutput()
                 abort(QStringLiteral("invalid_worker_event"));
                 return;
             }
-            if (m_mediaRequest && m_sequence == 4 && !m_planningProgressReceived) {
+            if (m_mediaRequest && m_sequence == 4 && (!m_planningProgressReceived || !m_reviewingProgressReceived)) {
                 abort(QStringLiteral("invalid_worker_event"));
                 return;
             }
@@ -258,14 +259,22 @@ void Montaz::WorkerClient::readOutput()
             if (message.size() != 7 || !QRegularExpression(QStringLiteral("^gemini-[a-zA-Z0-9.-]{1,100}$")).match(model).hasMatch() || total != videos ||
                 completed < m_progressCompleted || completed > total || cached < m_progressCached || cached > completed ||
                 message.value(QStringLiteral("completed")) != completed || message.value(QStringLiteral("cached")) != cached ||
-                message.value(QStringLiteral("total")) != total || (phase != QStringLiteral("analysis") && phase != QStringLiteral("planning")) ||
-                (phase == QStringLiteral("planning") && completed != total) || (phase == QStringLiteral("analysis") && m_planningProgressReceived)) {
+                message.value(QStringLiteral("total")) != total ||
+                (phase != QStringLiteral("analysis") && phase != QStringLiteral("planning") && phase != QStringLiteral("reviewing")) ||
+                (phase != QStringLiteral("analysis") && completed != total) || (phase == QStringLiteral("analysis") && m_planningProgressReceived) ||
+                (phase == QStringLiteral("planning") && m_planningProgressReceived) ||
+                (phase == QStringLiteral("reviewing") && (!m_planningProgressReceived || m_reviewingProgressReceived))) {
                 abort(QStringLiteral("invalid_worker_progress"));
                 return;
             }
             m_progressCompleted = completed;
             m_progressCached = cached;
-            m_planningProgressReceived = phase == QStringLiteral("planning");
+            if (phase == QStringLiteral("planning")) m_planningProgressReceived = true;
+            if (phase == QStringLiteral("reviewing")) {
+                m_reviewingProgressReceived = true;
+                // The optional critic cannot extend the run into a review loop.
+                m_deadline.start(qMax(1, qMin(45000, m_deadline.remainingTime())));
+            }
             record(QStringLiteral("progress"), {{QStringLiteral("provider"), QStringLiteral("gemini")},
                                                 {QStringLiteral("model"), model},
                                                 {QStringLiteral("phase"), phase},
@@ -414,6 +423,10 @@ void Montaz::WorkerClient::readOutput()
                     {QStringLiteral("cached"), soundtrack.value(QStringLiteral("cached"))}});
         } else if (type == QStringLiteral("timing") && m_timingRequest && m_ready && m_completed && m_proposal.isEmpty() && message.size() == 3) {
             const auto proposal = message.value(QStringLiteral("proposal")).toObject();
+            if (m_mediaRequest && !message.contains(QStringLiteral("review"))) {
+                abort(QStringLiteral("invalid_editorial_review"));
+                return;
+            }
             if (proposal.value(QStringLiteral("request_id")) != m_requestId || !validateTimingProposal(m_snapshot, m_timingSpec, proposal).isEmpty()) {
                 abort(QStringLiteral("invalid_timing_proposal"));
                 return;
@@ -452,6 +465,8 @@ void Montaz::WorkerClient::readOutput()
                         {QStringLiteral("requested_frames"), m_review.value(QStringLiteral("requested_frames"))},
                         {QStringLiteral("available_frames"), m_review.value(QStringLiteral("available_frames"))},
                         {QStringLiteral("skipped_assets"), m_review.value(QStringLiteral("skipped_assets"))},
+                        {QStringLiteral("review_status"), m_review.value(QStringLiteral("assessment")).toObject().value(QStringLiteral("status"))},
+                        {QStringLiteral("review_code"), m_review.value(QStringLiteral("assessment")).toObject().value(QStringLiteral("code"))},
                         {QStringLiteral("mean_model_quality"), quality / m_review.value(QStringLiteral("shots")).toArray().size()}});
             }
         } else {

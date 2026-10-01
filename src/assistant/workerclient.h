@@ -70,6 +70,7 @@ private:
     int m_progressCached{0};
     bool m_mediaRequest{false};
     bool m_planningProgressReceived{false};
+    bool m_reviewingProgressReceived{false};
     bool m_ready{false};
     bool m_completed{false};
     bool m_busy{false};

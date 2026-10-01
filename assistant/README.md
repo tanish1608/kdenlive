@@ -75,7 +75,8 @@ critic fallback or caption job on silent footage.
 
 Stop kills owned FFmpeg children and terminates the worker with a 750 ms grace
 period. Media extraction has a 15-second deadline, requests 35 seconds, and the
-native run three minutes. Completed cache entries survive Stop and later failures.
+native run three minutes. Review is additionally capped at 45 seconds without
+extending that overall deadline. Completed cache entries survive Stop and later failures.
 The **Run logs** button opens redacted timestamps, model, progress/cache counts,
 terminal status, duration/shot/mean-score metrics and apply acknowledgments;
 footage paths/descriptions/briefs/shot reasons and provider stderr are excluded.
@@ -84,6 +85,28 @@ Gemini uses the official [GenerateContent REST API](https://ai.google.dev/api/ge
 with JSON output, followed by strict local/native validation. Narration, source
 audio pairing and beat-based editing remain pending. Reviewed speech captions and
 native subtitle presets are described below.
+
+## One draft quality review
+
+Each valid visual draft receives one additional Gemini text review using its
+existing sampled observations. It can keep the draft or propose one complete
+revision of shot selection/order/durations, with a short reason. Revised shots
+pass the original recipe, quality, distinct-content and source-range checks and
+must preserve the draft's exact total frame count. No footage is reanalyzed for
+this review, and no automatic critic/revision loop or retry runs.
+
+Review is limited to 24 draft shots, 32 candidate sources and 96 KiB of context;
+larger inputs skip it explicitly. A provider/response/validation failure retains
+the original validated draft as **quality review unavailable**, with manual
+inspection before Apply. Failures never imply model approval. Stop discards late
+results. The native review phase has a 45-second deadline in addition to the
+provider's 35-second socket timeout; a forced timeout fails the run. Completed
+analysis stays cached. Logs contain only review status/code, not its explanation.
+
+The review checks a proposed draft, not a rendered finished sequence. Sampled
+observations cannot verify exact action endings, musical phrasing or perceptual
+quality. Apply still appends the reviewed draft using native one-batch Undo;
+replacing an existing finished edit remains a separate implementation gate.
 
 ## Instrumental music
 

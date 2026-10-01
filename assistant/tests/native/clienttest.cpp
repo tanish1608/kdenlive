@@ -589,7 +589,11 @@ EXIT
     void editorialReviewCannotInventShotsOrMisstateDuration()
     {
         const QJsonObject shot{{"instance_id", "request:0"}, {"role", "detail"}, {"quality", 80}, {"reason", "Visible detail introduces the place"}};
-        const QJsonObject review{{"requested_frames", 1800}, {"available_frames", 120}, {"skipped_assets", 2}, {"shots", QJsonArray{shot}}};
+        const QJsonObject review{{"requested_frames", 1800},
+                                 {"available_frames", 120},
+                                 {"skipped_assets", 2},
+                                 {"shots", QJsonArray{shot}},
+                                 {"assessment", QJsonObject{{"status", "kept"}, {"reason", "Coherent observed detail"}, {"code", "none"}}}};
         QVERIFY(Montaz::validateEditorialReview(snapshot(), proposal(), review).isEmpty());
         for (const auto &key : {QStringLiteral("requested_frames"), QStringLiteral("available_frames")}) {
             auto invalid = review;
@@ -608,6 +612,19 @@ EXIT
         auto invalid = review;
         invalid["skipped_assets"] = 6;
         QVERIFY(!Montaz::validateEditorialReview(snapshot(), proposal(), invalid).isEmpty());
+        for (const auto &assessment :
+             {QJsonObject{{"status", "approved"}, {"reason", "Good"}, {"code", "none"}}, QJsonObject{{"status", "kept"}, {"reason", " "}, {"code", "none"}},
+              QJsonObject{{"status", "revised"}, {"reason", QString(601, 'x')}, {"code", "none"}},
+              QJsonObject{{"status", "unavailable"}, {"reason", "Approved anyway"}, {"code", "provider_timeout"}},
+              QJsonObject{{"status", "unavailable"}, {"reason", ""}, {"code", "private arbitrary text"}},
+              QJsonObject{{"status", "kept"}, {"reason", "Good"}, {"code", "provider_timeout"}}}) {
+            invalid = review;
+            invalid["assessment"] = assessment;
+            QVERIFY(!Montaz::validateEditorialReview(snapshot(), proposal(), invalid).isEmpty());
+        }
+        invalid = review;
+        invalid["assessment"] = QJsonObject{{"status", "unavailable"}, {"reason", ""}, {"code", "provider_timeout"}};
+        QVERIFY(Montaz::validateEditorialReview(snapshot(), proposal(), invalid).isEmpty());
     }
     void batchFailureRollsBackAndNeverCommits()
     {
@@ -799,6 +816,7 @@ p={'request_id':r['request_id'],'project_id':s['project_id'],'sequence_id':s['se
    'base_revision':s['revision'],'frame_rate':s['frame_rate'],'protocol_version':1,
    'operations':[{'instance_id':'one','bin_id':'1','track_id':'1','start_frame':0,'in_frame':0,'duration_frames':60}]}
 review={'requested_frames':1800,'available_frames':120,'skipped_assets':2,
+        'assessment':{'status':'kept','reason':'private review rationale','code':'none'},
         'shots':[{'instance_id':'one','role':'detail','quality':80,'reason':'private editorial text'}]}
 FAULT
 send({'type':'proposal','proposal':p,'review':review})
@@ -824,6 +842,93 @@ EXIT
                 QVERIFY(!file.readAll().contains("private editorial text"));
             }
         }
+    }
+    void draftReviewRequiresOrderedProgressAndExplicitAssessment()
+    {
+        const QByteArray script = R"PY(import json,sys
+r=json.loads(sys.stdin.readline())
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n in (1,2):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'planner','status':'running','reason':''})
+for phase in PHASES:
+    send({'type':'progress','phase':phase,'completed':6,'cached':6,'total':6,'model':'gemini-test'})
+for n in (3,4):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==4 else 'planner','status':'completed','reason':''})
+s=r['snapshot']
+p={'request_id':r['request_id'],'project_id':s['project_id'],'sequence_id':s['sequence_id'],
+   'base_revision':s['revision'],'frame_rate':s['frame_rate'],'protocol_version':1,
+   'operations':[{'instance_id':'one','bin_id':'1','track_id':'1','start_frame':0,'in_frame':0,'duration_frames':60}]}
+review={'requested_frames':1800,'available_frames':120,'skipped_assets':2,
+        'assessment':{'status':'revised','reason':'private review explanation','code':'none'},
+        'shots':[{'instance_id':'one','role':'detail','quality':80,'reason':'private shot rationale'}]}
+FAULT
+send({'type':'proposal','proposal':p,'review':review})
+EXIT
+)PY";
+        for (int fault = 0; fault < 7; ++fault) {
+            auto worker = script;
+            worker.replace("PHASES", fault == 1   ? "('analysis','planning')"
+                                     : fault == 2 ? "('analysis','reviewing','planning')"
+                                     : fault == 3 ? "('analysis','planning','reviewing','reviewing')"
+                                                  : "('analysis','planning','reviewing')");
+            worker.replace("FAULT", fault == 4   ? "review.pop('assessment')"
+                                    : fault == 5 ? "review['assessment']={'status':'unavailable','reason':'','code':'provider_timeout'}"
+                                                 : "pass");
+            worker.replace("EXIT", fault == 6 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::proposalReady), failures(&client, &Montaz::WorkerClient::failed);
+            QJsonObject sources;
+            for (int i = 1; i <= 6; ++i)
+                sources[QString::number(i)] = QStringLiteral("/private/footage%1.mp4").arg(i);
+            QVERIFY(client.start(snapshot(),
+                                 {{"sources", sources}, {"brief", QJsonObject{{"duration_seconds", 60}, {"recipe", "postcard"}, {"instruction", "Travel"}}}}));
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            const bool valid = fault == 0 || fault == 5;
+            QCOMPARE(ready.count(), valid ? 1 : 0);
+            QCOMPARE(failures.count(), valid ? 0 : 1);
+            QCOMPARE(client.editorialReview().isEmpty(), !valid);
+            const auto logs = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+            for (const auto &name : QDir(logs).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+                QFile file(logs + name);
+                QVERIFY(file.open(QIODevice::ReadOnly));
+                const auto bytes = file.readAll();
+                QVERIFY(!bytes.contains("private review explanation"));
+                QVERIFY(!bytes.contains("private shot rationale"));
+                QVERIFY(!bytes.contains("/private/footage"));
+            }
+        }
+    }
+    void stopDuringDraftReviewDiscardsLateResult()
+    {
+        QTemporaryDir temp;
+        fakeWorker(temp.path(), R"PY(import json,sys,time,signal
+r=json.loads(sys.stdin.readline())
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+signal.signal(signal.SIGTERM,lambda *_: None)
+send({'type':'ready'})
+for n in (1,2):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'planner','status':'running','reason':''})
+for phase in ('analysis','planning','reviewing'):
+    send({'type':'progress','phase':phase,'completed':6,'cached':6,'total':6,'model':'gemini-test'})
+time.sleep(10)
+)PY");
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+        QSignalSpy events(&client, &Montaz::WorkerClient::eventReceived), ready(&client, &Montaz::WorkerClient::proposalReady),
+            stopped(&client, &Montaz::WorkerClient::stopped);
+        QJsonObject sources;
+        for (int i = 1; i <= 6; ++i)
+            sources[QString::number(i)] = QStringLiteral("/private/footage%1.mp4").arg(i);
+        QVERIFY(client.start(snapshot(),
+                             {{"sources", sources}, {"brief", QJsonObject{{"duration_seconds", 60}, {"recipe", "postcard"}, {"instruction", "Travel"}}}}));
+        QTRY_COMPARE_WITH_TIMEOUT(events.count(), 5, 3000);
+        client.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
+        QVERIFY(!client.busy());
+        QCOMPARE(ready.count(), 0);
+        QVERIFY(client.editorialReview().isEmpty());
     }
     void missingGeminiKeyIsExplicitAndSourcePathsAreNotLogged()
     {

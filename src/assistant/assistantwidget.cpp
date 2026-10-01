@@ -314,6 +314,13 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             }
             m_activeTask = 1;
             m_status->setText(i18n("Planning cuts…"));
+        } else if (event.value(QStringLiteral("phase")) == QStringLiteral("reviewing")) {
+            setTask(0, i18n("Done"));
+            setTask(1, i18n("Done"));
+            setTask(2, i18n("Working"));
+            m_activeTask = 2;
+            m_status->setText(i18n("Reviewing story and pacing…"));
+            m_chat->addMessage(i18n("Assistant"), i18n("I’m checking this draft against the cached observations once. Any revision keeps its total length."));
         } else {
             m_status->setText(i18n("Analyzed %1 of %2 videos · %3 cached", event.value(QStringLiteral("completed")).toInt(),
                                    event.value(QStringLiteral("total")).toInt(), event.value(QStringLiteral("cached")).toInt()));
@@ -367,6 +374,24 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_previewCard->show();
         const double seconds = frames * secondsPerFrame;
         if (!review.isEmpty()) {
+            const auto assessment = review.value(QStringLiteral("assessment")).toObject();
+            const auto status = assessment.value(QStringLiteral("status")).toString();
+            const auto reason = assessment.value(QStringLiteral("reason")).toString();
+            if (status == QStringLiteral("unavailable")) {
+                setTask(2, i18n("Unavailable"));
+                const bool limited = assessment.value(QStringLiteral("code")) == QStringLiteral("review_limit");
+                m_chat->addMessage(i18n("Assistant"),
+                                   limited
+                                       ? i18n("Quality review was skipped because this draft exceeds the review limit. The original draft passed source "
+                                              "and timing checks; review its story and pacing yourself before Apply.")
+                                       : i18n("Quality review was unavailable. The original draft passed source and timing checks, but its story and pacing "
+                                              "were not reviewed. You can inspect it before Apply or try again."));
+            } else {
+                m_chat->addMessage(i18n("Assistant"), status == QStringLiteral("revised")
+                                                          ? i18n("One revision was proposed with the same total length: %1", reason)
+                                                          : i18n("The model review kept the draft: %1", reason));
+                m_chat->addMessage(i18n("Assistant"), i18n("This review uses sampled observations. Preview the actual cuts to judge the result."));
+            }
             m_chat->addMessage(i18n("Assistant"),
                                i18n("Your footage offers up to %1 seconds of distinct usable shots for this style. %2 sources were excluded because they "
                                     "were too short, unsuitable, or duplicates. Select a proposed shot to see why it belongs in the story.",
@@ -378,7 +403,9 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                                                         index, QString::number(seconds, 'f', 1), m_requestedSeconds)
                                                  : i18n("Your %1-shot plan is ready (%2 seconds). Review the shots above, then apply or send a refinement.",
                                                         index, QString::number(seconds, 'f', 1)));
-        m_status->setText(i18n("Ready for review · video only"));
+        m_status->setText(review.value(QStringLiteral("assessment")).toObject().value(QStringLiteral("status")) == QStringLiteral("unavailable")
+                              ? i18n("Draft ready · quality review unavailable")
+                              : i18n("Ready for review · video only"));
     });
     connect(m_worker, &WorkerClient::soundtrackReady, this, [this](const QJsonObject &soundtrack) {
         if (m_adapter->snapshot() != m_snapshot || !validateSoundtrack(m_snapshot, m_musicSpec, soundtrack, m_effectMode).isEmpty()) {
@@ -645,7 +672,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
     m_cueMode = false;
     m_timingMode = false;
     m_captionMode = false;
-    const QStringList taskNames{i18n("Understand footage"), i18n("Arrange the story"), i18n("Review proposed shots"), i18n("Apply to timeline")};
+    const QStringList taskNames{i18n("Understand footage"), i18n("Arrange the story"), i18n("Check story and pacing"), i18n("Apply to timeline")};
     for (int row = 0; row < 4; ++row)
         m_tasks->topLevelItem(row)->setText(0, taskNames[row]);
     finishTasks(i18n("Superseded"));

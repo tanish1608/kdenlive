@@ -58,6 +58,7 @@ class PlanningTests(unittest.TestCase):
             ]
         }
         self.provider = Mock(model="test-model")
+        self.kept = {"decision": "keep", "reason": "The observed detail provides a coherent opening", "shots": []}
         self.provider.generate.return_value = self.observation
         self.media = MediaTools()
         self.media.image = Mock(return_value={"text": "synthetic frame"})
@@ -238,6 +239,7 @@ class PlanningTests(unittest.TestCase):
                     }
                 ]
             },
+            self.kept,
         ]
         plan_media(
             self.snapshot,
@@ -249,7 +251,7 @@ class PlanningTests(unittest.TestCase):
             self.media,
             lambda *_: None,
         )
-        prompt = self.provider.generate.call_args.args[0][0]["text"]
+        prompt = self.provider.generate.call_args_list[1].args[0][0]["text"]
         self.assertIn("feasible target from distinct usable windows is 50 frames", prompt)
 
     def test_duplicate_unknown_unusable_or_excessive_shots_are_rejected(self):
@@ -303,7 +305,7 @@ class PlanningTests(unittest.TestCase):
             ]
         }
         events = []
-        self.provider.generate.side_effect = [self.observation, shots, shots]
+        self.provider.generate.side_effect = [self.observation, shots, self.kept, shots, self.kept]
         for _ in range(2):
             plan_media(
                 self.snapshot,
@@ -316,7 +318,8 @@ class PlanningTests(unittest.TestCase):
                 lambda *event: events.append(event),
             )
         self.assertIn(("planning", 1, 1, 1), events)
-        self.assertEqual(self.provider.generate.call_count, 3)  # one analysis, two plans
+        self.assertIn(("reviewing", 1, 1, 1), events)
+        self.assertEqual(self.provider.generate.call_count, 5)  # one analysis, two plans/reviews
 
     def test_duplicate_content_in_parallel_is_analyzed_only_once(self):
         second = self.root / "copy.mp4"
@@ -334,6 +337,7 @@ class PlanningTests(unittest.TestCase):
                     }
                 ]
             },
+            self.kept,
         ]
         proposal = plan_media(
             snapshot,
@@ -345,7 +349,7 @@ class PlanningTests(unittest.TestCase):
             self.media,
             lambda *_: None,
         )
-        self.assertEqual(self.provider.generate.call_count, 2)  # analysis + plan
+        self.assertEqual(self.provider.generate.call_count, 3)  # analysis + plan + review
         self.assertEqual(len(proposal.operations), 1)
 
     def test_two_video_analysis_requests_overlap(self):
@@ -358,6 +362,8 @@ class PlanningTests(unittest.TestCase):
             if any(p.get("text", "").startswith("Analyze") for p in parts):
                 barrier.wait()
                 return self.observation
+            if parts[0]["text"].startswith("Review"):
+                return self.kept
             return {
                 "shots": [
                     {
@@ -527,6 +533,7 @@ class PlanningTests(unittest.TestCase):
                     }
                 ]
             },
+            self.kept,
         ]
         reviews = []
         proposal = plan_media(
@@ -543,8 +550,33 @@ class PlanningTests(unittest.TestCase):
         review = reviews[0]
         self.assertEqual(review["available_frames"], 50)
         self.assertEqual(review["skipped_assets"], 1)
+        self.assertEqual(review["assessment"]["status"], "kept")
         self.assertEqual(review["shots"][0]["instance_id"], proposal.operations[0].instance_id)
         self.assertNotIn(str(self.path), json.dumps(review))
+
+    def test_revised_plan_and_metadata_use_cached_evidence_and_same_span(self):
+        second = self.root / "second.mp4"
+        second.write_bytes(b"another source")
+        snapshot = replace(self.snapshot, assets=(self.asset, replace(self.asset, bin_id="2")))
+        self.analysis()
+        self.analysis(source=str(second), asset=snapshot.assets[1])
+        draft = {"shots": [dict(bin_id=bid, window_id=0, duration_frames=50,
+                                reason="An observed detail connects the coast") for bid in ("1", "2")]}
+        self.provider.generate.reset_mock()
+        self.media.video.reset_mock()
+        self.provider.generate.side_effect = [draft, dict(decision="revise", reason="Open with the second observed view",
+                                                        shots=list(reversed(draft["shots"])))]
+        reviews, events = [], []
+        proposal = plan_media(snapshot, "r", {"1": str(self.path), "2": str(second)}, self.brief,
+                              self.root / "cache", self.provider, self.media,
+                              lambda *event: events.append(event), reviews.append)
+        self.assertEqual([op.bin_id for op in proposal.operations], ["2", "1"])
+        self.assertEqual(sum(op.duration_frames for op in proposal.operations), 100)
+        self.assertEqual(reviews[0]["assessment"]["status"], "revised")
+        self.assertEqual(reviews[0]["shots"][0]["instance_id"], proposal.operations[0].instance_id)
+        self.assertIn(("reviewing", 2, 2, 2), events)
+        self.assertEqual(self.provider.generate.call_count, 2)
+        self.media.video.assert_not_called()
 
     def test_unwatchable_ranges_and_empty_rationales_are_rejected(self):
         window = {**candidates(self.asset, self.rate)[0], **self.observation["windows"][0]}

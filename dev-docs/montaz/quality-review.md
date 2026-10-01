@@ -194,3 +194,37 @@ energy gate is not voice detection. Narration, processed/overlapping dialogue,
 ducking and perceptual editorial review remain pending. Qt/macOS accessibility
 inspection can still crash on dynamic UI; that separate SDK issue is unresolved.
 All fixture media, logs, projects, caches and exports remain outside Git.
+
+## Bounded draft review checkpoint
+
+One additional text request now reviews each valid draft against cached sampled
+observations. It can keep the draft or return one revised shot sequence with
+exactly the same total frames. Original bounds, recipe durations and distinct
+content still apply. Failure retains an explicitly unreviewed draft; cancellation
+never takes that fallback. The phase has a 45-second native cap within the
+three-minute run deadline, with no automatic retry or recursive critic.
+
+A controlled request using five cache-matching sources from the saved Goa bin
+reused all five entries, selected four shots totaling **193 frames / 6.440 seconds**
+at 30000/1001 FPS, and completed planning/review in **7.70 seconds**. The model kept
+the draft. A second real native Qt/Python transport check completed in **14.32
+seconds**, reused those five entries, and returned a kept four-shot/193-frame
+draft after strict native progress/review validation and clean exit. Its log
+records status/code and numeric metrics, without the model's explanation.
+
+These are selected-source integration checks, not a controlled comparison with
+the older travel export. Sampled observations cannot establish exact action
+endings or finished-film quality; the model keeping a draft is not approval.
+
+Desktop testing used a copied `goa-editorial-review.kdenlive` with a separate empty
+sequence. The full-bin request failed in analysis with `invalid_model_response`
+before reaching review. AX inspection then reproduced the known accessibility
+crash. The current saved fixture retains the earlier sequence and empty test
+sequence; successful review/Apply/export in the desktop remains an open gate.
+No new finished travel video or perceptual improvement is claimed.
+
+127 Python, 34 Qt transport and 7 chat checks, plus native `assistanttest`, pass.
+Tests cover invalid revisions/approval claims, exact duration, cached planning,
+failed review, clean exits, progress order, redaction and cancellation during an
+unresponsive review. Replacing a finished edit and mixed-media perceptual review
+remain pending; private fixtures and diagnostic outputs stay outside Git.

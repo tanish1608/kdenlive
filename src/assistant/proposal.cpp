@@ -106,9 +106,21 @@ QString Montaz::validateSnapshot(const QJsonObject &snapshot)
 
 QString Montaz::validateEditorialReview(const QJsonObject &snapshot, const QJsonObject &proposal, const QJsonObject &review)
 {
-    if (!fields(review, {QStringLiteral("requested_frames"), QStringLiteral("available_frames"), QStringLiteral("skipped_assets"), QStringLiteral("shots")}) ||
+    if (!fields(review, {QStringLiteral("requested_frames"), QStringLiteral("available_frames"), QStringLiteral("skipped_assets"), QStringLiteral("shots"),
+                         QStringLiteral("assessment")}) ||
         !integer(review.value(QStringLiteral("requested_frames")), 1) || !integer(review.value(QStringLiteral("available_frames")), 1) ||
         !integer(review.value(QStringLiteral("skipped_assets"))) || !review.value(QStringLiteral("shots")).isArray())
+        return invalid();
+    const auto assessment = review.value(QStringLiteral("assessment")).toObject();
+    const auto status = assessment.value(QStringLiteral("status")).toString();
+    const auto reason = assessment.value(QStringLiteral("reason"));
+    const auto code = assessment.value(QStringLiteral("code")).toString();
+    const QStringList unavailableCodes{QStringLiteral("provider_auth"),          QStringLiteral("provider_timeout"), QStringLiteral("provider_unavailable"),
+                                       QStringLiteral("invalid_model_response"), QStringLiteral("invalid_review"),   QStringLiteral("review_limit")};
+    if (!fields(assessment, {QStringLiteral("status"), QStringLiteral("reason"), QStringLiteral("code")}) || !reason.isString() ||
+        (status == QStringLiteral("unavailable") ? (!reason.toString().isEmpty() || !unavailableCodes.contains(code))
+                                                 : ((status != QStringLiteral("kept") && status != QStringLiteral("revised")) ||
+                                                    code != QStringLiteral("none") || reason.toString().trimmed().isEmpty() || reason.toString().size() > 600)))
         return invalid();
     const auto shots = review.value(QStringLiteral("shots")).toArray();
     const auto operations = proposal.value(QStringLiteral("operations")).toArray();
