@@ -11,6 +11,7 @@
 #include "doc/docundostack.hpp"
 #include "doc/kdenlivedoc.h"
 #include "effects/effectstack/model/effectstackmodel.hpp"
+#include "mainwindow.h"
 #include "project/projectmanager.h"
 #include "timeline2/model/timelineitemmodel.hpp"
 
@@ -66,6 +67,11 @@ void Montaz::EditorAdapter::bind()
     m_connections << connect(timeline.get(), &QAbstractItemModel::rowsRemoved, this, [this]() { invalidate(); });
     m_connections << connect(timeline.get(), &QAbstractItemModel::rowsMoved, this, [this]() { invalidate(); });
     m_connections << connect(timeline.get(), &QAbstractItemModel::modelReset, this, [this]() { invalidate(); });
+    watchSubtitles(timeline);
+    m_connections << connect(timeline.get(), &TimelineItemModel::subtitleModelInitialized, this, [this]() {
+        watchSubtitles(m_timeline.lock());
+        invalidate();
+    });
     const auto stack = pCore->projectManager()->undoStack();
     if (stack) m_connections << connect(stack.get(), &QUndoStack::indexChanged, this, [this]() { invalidate(); });
 }
@@ -416,4 +422,135 @@ QString Montaz::EditorAdapter::applyTiming(const QJsonObject &context, const QJs
     if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
     invalidate();
     return result;
+}
+
+void Montaz::EditorAdapter::watchSubtitles(const std::shared_ptr<TimelineItemModel> &timeline)
+{
+    if (!timeline || !timeline->getSubtitleModel()) return;
+    const auto model = timeline->getSubtitleModel();
+    m_connections << connect(model.get(), &QAbstractItemModel::dataChanged, this, [this]() { invalidate(); });
+    m_connections << connect(model.get(), &QAbstractItemModel::rowsInserted, this, [this]() { invalidate(); });
+    m_connections << connect(model.get(), &QAbstractItemModel::rowsRemoved, this, [this]() { invalidate(); });
+    m_connections << connect(model.get(), &QAbstractItemModel::modelReset, this, [this]() { invalidate(); });
+}
+
+QJsonObject Montaz::EditorAdapter::captionRequest()
+{
+    const auto current = snapshot();
+    const auto timeline = m_timeline.lock();
+    if (current.isEmpty() || !timeline) return {};
+    const auto subs = timeline->getSubtitleModel();
+    if (subs && (subs->rowCount() || subs->isLocked() || subs->isDisabled())) return {};
+    std::vector<QJsonObject> selected;
+    for (const auto v : current.value(QStringLiteral("occupied")).toArray()) {
+        auto c = v.toObject();
+        const int id = c.value(QStringLiteral("instance_id")).toString().toInt(), track = c.value(QStringLiteral("track_id")).toString().toInt();
+        if (!timeline->isAudioTrack(track) || timeline->getClipState(id).first != PlaylistState::AudioOnly ||
+            (timeline->getTrackProperty(track, QStringLiteral("hide")).toInt() & 2))
+            continue;
+        const auto binId = timeline->getClipBinId(id);
+        const auto asset = pCore->projectItemModel()->getClipByBinID(binId);
+        if (!asset) return {};
+        const auto role = asset->getProducerProperty(QStringLiteral("kdenlive:montaz_role"));
+        if (role == QStringLiteral("music") || role == QStringLiteral("effect") ||
+            QFileInfo(asset->clipUrl()).absolutePath().endsWith(QStringLiteral(".assets/music")))
+            continue;
+        // Source decoding cannot reproduce native processing; reject rather than transcribe the wrong sound.
+        if (timeline->getClipSpeed(id) != 1.0 || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 ||
+            timeline->getClipEffectStackModel(id)->rowCount() || timeline->getTrackEffectStackModel(track)->rowCount())
+            return {};
+        c[QStringLiteral("bin_id")] = binId;
+        c[QStringLiteral("in_frame")] = timeline->getClipIn(id);
+        c[QStringLiteral("audio_stream")] = timeline->data(timeline->makeClipIndexFromID(id), TimelineModel::AudioStreamRole).toInt();
+        selected.push_back(c);
+    }
+    std::sort(selected.begin(), selected.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        return a.value(QStringLiteral("start_frame")).toInt() < b.value(QStringLiteral("start_frame")).toInt();
+    });
+    QJsonArray clips;
+    for (const auto &c : selected)
+        clips.append(c);
+    const QJsonObject spec{{QStringLiteral("clips"), clips}};
+    return validateCaptionRequest(current, spec).isEmpty() ? spec : QJsonObject{};
+}
+
+QJsonObject Montaz::EditorAdapter::audioSources(const QJsonObject &context, const QSet<QString> &selected)
+{
+    if (snapshot() != context) return {};
+    QJsonObject result;
+    for (const auto &id : selected) {
+        const auto clip = pCore->projectItemModel()->getClipByBinID(id);
+        if (!clip || !clip->hasAudio() || !QFileInfo(clip->clipUrl()).isFile()) return {};
+        result[id] = QFileInfo(clip->clipUrl()).absoluteFilePath();
+    }
+    return result;
+}
+
+QString Montaz::EditorAdapter::applyCaptions(const QJsonObject &context, const QJsonObject &spec, const QJsonObject &review)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot() != context || captionRequest() != spec || !validateCaptions(context, spec, review).isEmpty() ||
+        review.value(QStringLiteral("captions")).toArray().isEmpty())
+        return QStringLiteral("invalid_captions");
+    const auto request = review.value(QStringLiteral("request_id")).toString();
+    if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
+    const auto hashes = review.value(QStringLiteral("source_sha256")).toObject();
+    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
+        const auto asset = pCore->projectItemModel()->getClipByBinID(it.key());
+        if (!asset) return QStringLiteral("media_changed");
+        QFile file(asset->clipUrl());
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024 || !hash.addData(&file) ||
+            QString::fromLatin1(hash.result().toHex()) != it.value().toString())
+            return QStringLiteral("media_changed");
+    }
+    const auto timeline = m_timeline.lock();
+    if (!timeline) return QStringLiteral("no_sequence");
+    if (pCore->window())
+        pCore->window()->showSubtitleTrack();
+    else if (!timeline->getSubtitleModel())
+        timeline->createSubtitleModel();
+    const auto model = timeline->getSubtitleModel();
+    if (!model || model->rowCount() || model->isLocked() || model->isDisabled()) return QStringLiteral("invalid_captions");
+    const double fps = pCore->getCurrentFps();
+    const auto result = applyInsertBatch(
+        review.value(QStringLiteral("captions")).toArray(),
+        [model, fps](const QJsonObject &c, UndoFunction &undo, UndoFunction &redo) {
+            const std::pair<int, GenTime> start{0, GenTime(c.value(QStringLiteral("start_frame")).toInt(), fps)};
+            const SubtitleEvent event(true, GenTime(c.value(QStringLiteral("start_frame")).toInt() + c.value(QStringLiteral("duration_frames")).toInt(), fps),
+                                      model->getLayerDefaultStyle(0), QString(), 0, 0, 0, QString(), c.value(QStringLiteral("text")).toString());
+            return model->addSubtitle(start, event, undo, redo, true);
+        },
+        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Add assistant captions")); });
+    if (result.isEmpty()) m_appliedRequests.insert(request);
+    if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
+    invalidate();
+    return result;
+}
+
+QString Montaz::EditorAdapter::captionStyle(const QString &preset)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot().isEmpty()) return QStringLiteral("no_sequence");
+    const auto timeline = m_timeline.lock();
+    const auto model = timeline ? timeline->getSubtitleModel() : nullptr;
+    if (!model || !model->rowCount()) return QStringLiteral("no_subtitles");
+    if (model->isLocked() || model->isDisabled()) return QStringLiteral("subtitles_unavailable");
+    if (!QStringList{QStringLiteral("clean"), QStringLiteral("bold"), QStringLiteral("original")}.contains(preset))
+        return QStringLiteral("invalid_caption_style");
+    QString style;
+    if (preset != QStringLiteral("original")) {
+        const auto info = model->scriptInfo();
+        const auto it = info.find(QStringLiteral("PlayResY"));
+        const int height = it == info.end() ? pCore->getCurrentFrameDisplaySize().height() : it->second.toInt();
+        if (height <= 0) return QStringLiteral("subtitles_unavailable");
+        style = QStringLiteral("FontName=Arial,FontSize=%1,Bold=%2,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=%3,Shadow="
+                               "0,Alignment=2,MarginV=%4")
+                    .arg(qMax(12, height / (preset == QStringLiteral("bold") ? 16 : 20)))
+                    .arg(preset == QStringLiteral("bold") ? -1 : 0)
+                    .arg(qMax(1, height / 360))
+                    .arg(qMax(12, height / 18));
+    }
+    if (model->getForceStyle() != style) model->setForceStyle(style);
+    return {};
 }

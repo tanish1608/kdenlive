@@ -3,6 +3,7 @@
 #include "assistant/editbatch.h"
 #include "assistant/editoradapter.h"
 #include "assistant/proposal.h"
+#include "bin/model/subtitlemodel.hpp"
 #include "bin/projectclip.h"
 #include "doc/kdenlivedoc.h"
 #include "test_utils.hpp"
@@ -404,6 +405,175 @@ TEST_CASE("Assistant imports generated audio and places it with one native undo"
         // Undo commands retain clip references; destroy them while the document lives.
         stack->clear();
     }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+}
+
+TEST_CASE("Assistant captions and style switches preserve native subtitle identity", "[Montaz]")
+{
+    QTemporaryDir temporary;
+    REQUIRE(temporary.isValid());
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto stack = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(stack);
+    document.setUrl(QUrl::fromLocalFile(temporary.filePath(QStringLiteral("captions.kdenlive"))));
+    document.setDocumentProperty(QStringLiteral("documentid"), QStringLiteral("montaz-caption-test-") + document.uuid().toString(QUuid::WithoutBraces));
+    pCore->projectManager()->testSetDocument(&document);
+    auto timeline = TimelineItemModel::construct(document.uuid(), stack);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int audio = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    {
+        const auto path = temporary.filePath(QStringLiteral("speech.wav"));
+        writeMusicWave(path, 6);
+        auto producer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), "avformat", path.toUtf8().constData());
+        REQUIRE(producer->is_valid());
+        QString binId;
+        Fun undo = []() { return true; }, redo = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(binId, producer, QStringLiteral("-1"), undo, redo));
+        int id = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("A%1/10/99").arg(binId), audio, 100, id));
+        stack->clear();
+        Montaz::EditorAdapter adapter;
+        const auto spec = adapter.captionRequest();
+        REQUIRE_FALSE(spec.isEmpty());
+        REQUIRE(spec.value(QStringLiteral("clips")).toArray().size() == 1);
+        REQUIRE(spec.value(QStringLiteral("clips")).toArray()[0].toObject().value(QStringLiteral("audio_stream")) == 0);
+        const auto context = adapter.snapshot();
+        QFile file(path);
+        REQUIRE(file.open(QIODevice::ReadOnly));
+        const auto hash = QString::fromLatin1(QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+        file.close();
+        QJsonArray captions;
+        for (int i = 0; i < 2; ++i)
+            captions.append(QJsonObject{{QStringLiteral("instance_id"), QString::number(id)},
+                                        {QStringLiteral("start_frame"), 100 + 30 * i},
+                                        {QStringLiteral("duration_frames"), 25},
+                                        {QStringLiteral("text"), QStringLiteral("Spoken words %1").arg(i)}});
+        const QJsonObject review{{QStringLiteral("request_id"), QStringLiteral("native-captions")},
+                                 {QStringLiteral("project_id"), context.value(QStringLiteral("project_id"))},
+                                 {QStringLiteral("sequence_id"), context.value(QStringLiteral("sequence_id"))},
+                                 {QStringLiteral("base_revision"), context.value(QStringLiteral("revision"))},
+                                 {QStringLiteral("frame_rate"), context.value(QStringLiteral("frame_rate"))},
+                                 {QStringLiteral("checked_clips"), 1},
+                                 {QStringLiteral("cached_clips"), 0},
+                                 {QStringLiteral("skipped_clips"), 0},
+                                 {QStringLiteral("source_sha256"), QJsonObject{{binId, hash}}},
+                                 {QStringLiteral("captions"), captions}};
+        SECTION("Apply one undo, replay rejection, repeated styles retain IDs and timing")
+        {
+            REQUIRE(adapter.applyCaptions(context, spec, review).isEmpty());
+            REQUIRE(stack->count() == 1);
+            auto model = timeline->getSubtitleModel();
+            REQUIRE(model);
+            REQUIRE(model->rowCount() == 2);
+            const auto originals = model->getAllSubtitles();
+            const auto firstId = model->getSubtitleIdFromIndex(0);
+            REQUIRE_FALSE(adapter.applyCaptions(context, spec, review).isEmpty());
+            stack->undo();
+            REQUIRE(model->rowCount() == 0);
+            REQUIRE(timeline->checkConsistency());
+            stack->redo();
+            REQUIRE(model->rowCount() == 2);
+            for (const auto &preset : {QStringLiteral("clean"), QStringLiteral("bold"), QStringLiteral("clean"), QStringLiteral("original")}) {
+                const auto before = model->getForceStyle();
+                const int count = stack->count();
+                REQUIRE(adapter.captionStyle(preset).isEmpty());
+                const auto after = model->getForceStyle();
+                REQUIRE(stack->count() == count + 1);
+                REQUIRE(model->getSubtitleIdFromIndex(0) == firstId);
+                const auto current = model->getAllSubtitles();
+                REQUIRE(current.size() == originals.size());
+                for (int i = 0; i < current.size(); ++i) {
+                    REQUIRE(current[i].first == originals[i].first);
+                    REQUIRE(current[i].second.endTime() == originals[i].second.endTime());
+                    REQUIRE(current[i].second.text() == originals[i].second.text());
+                }
+                REQUIRE(adapter.captionStyle(preset).isEmpty());
+                REQUIRE(stack->count() == count + 1);
+                stack->undo();
+                REQUIRE(model->getForceStyle() == before);
+                stack->redo();
+                REQUIRE(model->getForceStyle() == after);
+            }
+            REQUIRE(model->getForceStyle().isEmpty());
+            REQUIRE(timeline->getClipPosition(id) == 100);
+            REQUIRE(timeline->getClipIn(id) == 10);
+            REQUIRE(timeline->getClipPlaytime(id) == 90);
+            // Upstream checkConsistency counts clip/composition/guide snaps only, not subtitles.
+        }
+        SECTION("Source changes reject before creating native subtitles")
+        {
+            REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Append));
+            file.write("changed");
+            file.close();
+            REQUIRE(adapter.applyCaptions(context, spec, review) == QStringLiteral("media_changed"));
+            REQUIRE_FALSE(timeline->getSubtitleModel());
+            REQUIRE(stack->count() == 0);
+        }
+        SECTION("Muted audio is skipped and mute changes invalidate review")
+        {
+            timeline->setTrackProperty(audio, QStringLiteral("hide"), QStringLiteral("3"));
+            REQUIRE(adapter.captionRequest().value(QStringLiteral("clips")).toArray().isEmpty());
+            REQUIRE_FALSE(adapter.applyCaptions(context, spec, review).isEmpty());
+        }
+        SECTION("Native insertion failure does not accumulate a false undo command")
+        {
+            const auto model = timeline->createSubtitleModel();
+            Fun localUndo = []() { return true; }, localRedo = []() { return true; };
+            const double fps = pCore->getCurrentFps();
+            const SubtitleEvent event(true, GenTime(25, fps), model->getLayerDefaultStyle(0), QString(), 0, 0, 0, QString(), QStringLiteral("Words"));
+            REQUIRE(model->addSubtitle({0, GenTime(0, fps)}, event, localUndo, localRedo));
+            REQUIRE_FALSE(model->addSubtitle({0, GenTime(0, fps)}, event, localUndo, localRedo));
+            REQUIRE(model->rowCount() == 1);
+            REQUIRE(localUndo());
+            REQUIRE(model->rowCount() == 0);
+            REQUIRE(localRedo());
+            REQUIRE(model->rowCount() == 1);
+        }
+        stack->clear();
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+}
+
+TEST_CASE("Headless master-effect loading restores subtitles without a main window", "[Montaz]")
+{
+    REQUIRE(pCore->window() == nullptr);
+    QTemporaryDir temporary;
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto stack = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(stack);
+    document.setUrl(QUrl::fromLocalFile(temporary.filePath(QStringLiteral("headless.kdenlive"))));
+    document.setDocumentProperty(QStringLiteral("documentid"), document.uuid().toString(QUuid::WithoutBraces));
+    pCore->projectManager()->testSetDocument(&document);
+    auto timeline = TimelineItemModel::construct(document.uuid(), stack);
+    document.addTimeline(timeline->uuid(), timeline);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    {
+        auto service = std::make_shared<Mlt::Tractor>(pCore->getProjectProfile());
+        Mlt::Filter filter(pCore->getProjectProfile(), "avfilter.subtitles");
+        REQUIRE(filter.is_valid());
+        filter.set("internal_added", 237);
+        filter.set("av.force_style", "FontSize=32,Bold=-1");
+        filter.set("kdenlive:locked", 1);
+        filter.set("disable", 1);
+        service->attach(filter);
+        timeline->importMasterEffects(std::static_pointer_cast<Mlt::Service>(service));
+        auto model = timeline->getSubtitleModel();
+        REQUIRE(model);
+        REQUIRE(model->getForceStyle() == QStringLiteral("FontSize=32,Bold=-1"));
+        REQUIRE(model->isLocked());
+        REQUIRE(model->isDisabled());
+        REQUIRE(stack->count() == 0);
+    }
+    stack->clear();
     pCore->taskManager.slotCancelJobs();
     document.closing = true;
     bin->clean();

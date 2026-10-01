@@ -438,20 +438,20 @@ bool SubtitleModel::addSubtitle(std::pair<int, GenTime> start, const SubtitleEve
     }
     int id = TimelineModel::getNextId();
     Fun local_redo = [this, id, start, event, updateFilter]() {
-        addSubtitle(id, start, event, false, updateFilter);
+        if (!addSubtitle(id, start, event, false, updateFilter)) return false;
         QPair<int, int> range = {start.second.frames(pCore->getCurrentFps()), event.endTime().frames(pCore->getCurrentFps())};
         pCore->invalidateRange(range);
         pCore->refreshProjectRange(range);
         return true;
     };
     Fun local_undo = [this, id, start, event, updateFilter]() {
-        removeSubtitle(id, false, updateFilter);
+        if (!removeSubtitle(id, false, updateFilter)) return false;
         QPair<int, int> range = {start.second.frames(pCore->getCurrentFps()), event.endTime().frames(pCore->getCurrentFps())};
         pCore->invalidateRange(range);
         pCore->refreshProjectRange(range);
         return true;
     };
-    local_redo();
+    if (!local_redo()) return false;
     UPDATE_UNDO_REDO(local_redo, local_undo, undo, redo);
     return true;
 }

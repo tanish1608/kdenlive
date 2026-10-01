@@ -7,6 +7,7 @@ import signal
 import sys
 from pathlib import Path
 
+from .captions import propose_captions
 from .contracts import InsertClip, Proposal, ProposalError, validate_proposal
 from .effects import ElevenLabsEffects, compose_effect
 from .gemini import AssistantError, Gemini
@@ -105,9 +106,12 @@ def main() -> int:
         musical = request.get("type") in {"compose_music", "compose_effect"}
         timing = request.get("type") == "refine_timing"
         cues = request.get("type") == "suggest_sounds"
+        captions = request.get("type") == "propose_captions"
         fields(
             request,
-            keys | {"cues", "sources"}
+            keys | {"captions", "sources"}
+            if captions
+            else keys | {"cues", "sources"}
             if cues
             else keys | {"timing"}
             if timing
@@ -128,6 +132,7 @@ def main() -> int:
                 "compose_effect",
                 "refine_timing",
                 "suggest_sounds",
+                "propose_captions",
             }
         ):
             raise ProposalError("Unsupported request")
@@ -137,7 +142,9 @@ def main() -> int:
         if type(request_id) is not str or not request_id or len(request_id) > 128:
             raise ProposalError("Invalid request ID")
         stage = (
-            "sound_cues"
+            "captions"
+            if captions
+            else "sound_cues"
             if cues
             else "timing"
             if timing
@@ -151,7 +158,39 @@ def main() -> int:
         send_event(run.events[-1])
         run.transition(stage, Status.RUNNING)
         send_event(run.events[-1])
-        if cues:
+        if captions:
+
+            def caption_progress(completed, cached, skipped, total):
+                media.check()
+                output.write(
+                    encode(
+                        dict(
+                            version=1,
+                            type="caption_progress",
+                            completed=completed,
+                            cached=cached,
+                            skipped=skipped,
+                            total=total,
+                        )
+                    )
+                )
+                output.flush()
+
+            caption_review = propose_captions(
+                snapshot,
+                request_id,
+                request["captions"],
+                request["sources"],
+                Path(
+                    os.environ.get(
+                        "MONTAZ_ANALYSIS_CACHE", Path.home() / ".cache/montaz/analysis"
+                    )
+                )
+                / "speech",
+                media,
+                caption_progress,
+            )
+        elif cues:
             provider = Gemini.configured()
             cache = Path(
                 os.environ.get(
@@ -243,7 +282,9 @@ def main() -> int:
         run.finish()
         send_event(run.events[-1])
         message = (
-            {"version": 1, "type": "sound_cues", "review": cue_review}
+            {"version": 1, "type": "captions", "review": caption_review}
+            if captions
+            else {"version": 1, "type": "sound_cues", "review": cue_review}
             if cues
             else {"version": 1, "type": "timing", "proposal": proposal}
             if timing

@@ -181,3 +181,33 @@ measures -17.9 LUFS / -4.7 dBFS true peak. See quality-review.md for limitations
 Next gates remain separately cached speech/narration, silent-input skipping and
 native caption styles, plus bounded editorial revision. Portrait framing and
 packaging/publication remain deferred.
+
+## Reviewed speech captions — October 1, 2026
+
+The Captions menu now recognizes bounded placed original audio, reviews plain
+words and approximate timing, and applies one native undoable subtitle batch.
+Separate normalized-PCM evidence caching retains valid empty results; local
+silence/absent audio finishes without Gemini setup. Assistant music/effects and
+muted audio are excluded. Processed/overlapping audio and existing subtitles are
+explicitly unsupported in this first iteration. Stop, progress and failures have
+terminal states; logs contain counts, never speech text.
+
+114 Python, 32 Qt transport and 7 chat checks pass, together with native
+`assistanttest` and upstream `subtitlestest`. Native tests exercise source changes,
+rollback, fractional timing, style stability and headless loading. A duplicate
+subtitle insertion now reports failure instead of creating a false Undo success.
+Command-line subtitle loading no longer dereferences an absent main window.
+
+The separate Goa caption test uses a controlled synthetic speech fixture. Live
+recognition completed in 3.94 seconds; retry reused speech evidence. Desktop
+Apply/one Undo/Redo, Clean/Bold/Original switching and save/reopen passed. Style
+changes preserved the subtitle file exactly. Desktop and command-line exports
+both decoded 474 frames at 30000/1001 FPS, with readable captions. Desktop frames
+152/153 confirm the reviewed exclusive end boundary. This fixture has a black
+prefix from manual audio insertion; it is not a new travel-quality benchmark.
+Original footage, prior reviews and exports remain preserved outside Git.
+
+Approximate recognition timing is editable, not forced word alignment. Narration,
+ducking and one bounded editorial revision remain open. The known Qt/macOS
+accessibility inspection crash remains unresolved. Portrait framing and
+packaging/publication remain deferred.

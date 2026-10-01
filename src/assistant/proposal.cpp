@@ -516,3 +516,95 @@ QString Montaz::validateTimingProposal(const QJsonObject &snapshot, const QJsonO
     changedSnapshot[QStringLiteral("occupied")] = ranges;
     return changed ? validateTimingRequest(changedSnapshot, candidate) : invalid();
 }
+
+QString Montaz::validateCaptionRequest(const QJsonObject &snapshot, const QJsonObject &spec)
+{
+    if (!validateSnapshot(snapshot).isEmpty() || !fields(spec, {QStringLiteral("clips")}) || !spec.value(QStringLiteral("clips")).isArray() ||
+        spec.value(QStringLiteral("clips")).toArray().size() > 8)
+        return invalid();
+    QMap<QString, QJsonObject> assets, tracks, occupied;
+    for (const auto v : snapshot.value(QStringLiteral("assets")).toArray())
+        assets[v.toObject().value(QStringLiteral("bin_id")).toString()] = v.toObject();
+    for (const auto v : snapshot.value(QStringLiteral("tracks")).toArray())
+        tracks[v.toObject().value(QStringLiteral("track_id")).toString()] = v.toObject();
+    for (const auto v : snapshot.value(QStringLiteral("occupied")).toArray())
+        occupied[v.toObject().value(QStringLiteral("instance_id")).toString()] = v.toObject();
+    const auto rate = snapshot.value(QStringLiteral("frame_rate")).toObject();
+    const qint64 num = rate.value(QStringLiteral("numerator")).toInteger(), den = rate.value(QStringLiteral("denominator")).toInteger();
+    qint64 previous = -1, total = 0;
+    QSet<QString> seen;
+    for (const auto v : spec.value(QStringLiteral("clips")).toArray()) {
+        const auto c = v.toObject(), asset = assets.value(c.value(QStringLiteral("bin_id")).toString()),
+                   item = occupied.value(c.value(QStringLiteral("instance_id")).toString());
+        const auto id = c.value(QStringLiteral("instance_id")).toString();
+        const qint64 start = c.value(QStringLiteral("start_frame")).toInteger(), length = c.value(QStringLiteral("duration_frames")).toInteger();
+        if (!fields(c, {QStringLiteral("instance_id"), QStringLiteral("bin_id"), QStringLiteral("track_id"), QStringLiteral("start_frame"),
+                        QStringLiteral("in_frame"), QStringLiteral("duration_frames"), QStringLiteral("audio_stream")}) ||
+            !identifier(c.value(QStringLiteral("instance_id"))) || !range(c, QStringLiteral("start_frame")) || !range(c, QStringLiteral("in_frame")) ||
+            !integer(c.value(QStringLiteral("audio_stream"))) || c.value(QStringLiteral("audio_stream")).toInteger() > 63 ||
+            !asset.value(QStringLiteral("has_audio")).toBool() ||
+            tracks.value(c.value(QStringLiteral("track_id")).toString()).value(QStringLiteral("kind")) != QStringLiteral("audio") ||
+            item.value(QStringLiteral("track_id")) != c.value(QStringLiteral("track_id")) ||
+            item.value(QStringLiteral("start_frame")) != c.value(QStringLiteral("start_frame")) ||
+            item.value(QStringLiteral("duration_frames")) != c.value(QStringLiteral("duration_frames")) ||
+            c.value(QStringLiteral("in_frame")).toInteger() + length > asset.value(QStringLiteral("duration_frames")).toInteger() || seen.contains(id) ||
+            start < previous || length * den > 30 * num)
+            return invalid();
+        total += length;
+        previous = start + length;
+        seen.insert(id);
+    }
+    return total * den <= 120 * num ? QString() : invalid();
+}
+
+QString Montaz::validateCaptions(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review)
+{
+    if (!validateCaptionRequest(snapshot, spec).isEmpty() ||
+        !fields(review, {QStringLiteral("request_id"), QStringLiteral("project_id"), QStringLiteral("sequence_id"), QStringLiteral("base_revision"),
+                         QStringLiteral("frame_rate"), QStringLiteral("checked_clips"), QStringLiteral("cached_clips"), QStringLiteral("skipped_clips"),
+                         QStringLiteral("source_sha256"), QStringLiteral("captions")}) ||
+        !identifier(review.value(QStringLiteral("request_id"))) || review.value(QStringLiteral("project_id")) != snapshot.value(QStringLiteral("project_id")) ||
+        review.value(QStringLiteral("sequence_id")) != snapshot.value(QStringLiteral("sequence_id")) ||
+        review.value(QStringLiteral("base_revision")) != snapshot.value(QStringLiteral("revision")) ||
+        review.value(QStringLiteral("frame_rate")) != snapshot.value(QStringLiteral("frame_rate")) || !review.value(QStringLiteral("captions")).isArray() ||
+        review.value(QStringLiteral("captions")).toArray().size() > 128 || !review.value(QStringLiteral("source_sha256")).isObject())
+        return invalid();
+    const int total = spec.value(QStringLiteral("clips")).toArray().size();
+    for (const auto &key : {QStringLiteral("checked_clips"), QStringLiteral("cached_clips"), QStringLiteral("skipped_clips")})
+        if (!integer(review.value(key)) || review.value(key).toInteger() > total) return invalid();
+    if (review.value(QStringLiteral("checked_clips")) != total) return invalid();
+    QMap<QString, QJsonObject> clips;
+    QSet<QString> bins, captioned;
+    for (const auto v : spec.value(QStringLiteral("clips")).toArray()) {
+        const auto c = v.toObject();
+        clips[c.value(QStringLiteral("instance_id")).toString()] = c;
+        bins.insert(c.value(QStringLiteral("bin_id")).toString());
+    }
+    const auto hashes = review.value(QStringLiteral("source_sha256")).toObject();
+    const auto keys = hashes.keys();
+    if (QSet<QString>(keys.begin(), keys.end()) != bins) return invalid();
+    for (const auto v : hashes)
+        if (!QRegularExpression(QStringLiteral("^[a-f0-9]{64}$")).match(v.toString()).hasMatch()) return invalid();
+    const auto rate = snapshot.value(QStringLiteral("frame_rate")).toObject();
+    const qint64 maximum = (6 * rate.value(QStringLiteral("numerator")).toInteger() + rate.value(QStringLiteral("denominator")).toInteger() - 1) /
+                               rate.value(QStringLiteral("denominator")).toInteger() +
+                           1;
+    qint64 previous = -1;
+    for (const auto v : review.value(QStringLiteral("captions")).toArray()) {
+        const auto c = v.toObject(), clip = clips.value(c.value(QStringLiteral("instance_id")).toString());
+        const auto text = c.value(QStringLiteral("text")).toString();
+        const qint64 start = c.value(QStringLiteral("start_frame")).toInteger(), length = c.value(QStringLiteral("duration_frames")).toInteger();
+        if (!fields(c, {QStringLiteral("instance_id"), QStringLiteral("start_frame"), QStringLiteral("duration_frames"), QStringLiteral("text")}) ||
+            !range(c, QStringLiteral("start_frame")) || clip.isEmpty() || length > maximum || start < previous ||
+            start < clip.value(QStringLiteral("start_frame")).toInteger() ||
+            start + length > clip.value(QStringLiteral("start_frame")).toInteger() + clip.value(QStringLiteral("duration_frames")).toInteger() ||
+            !c.value(QStringLiteral("text")).isString() || text.trimmed().isEmpty() || text.size() > 84 || text.count(QLatin1Char('\n')) > 1 ||
+            text.contains(QLatin1Char('{')) || text.contains(QLatin1Char('}')) || text.contains(QLatin1Char('\\')))
+            return invalid();
+        for (const auto ch : text)
+            if (ch.category() == QChar::Other_Control && ch != QLatin1Char('\n')) return invalid();
+        previous = start + length;
+        captioned.insert(c.value(QStringLiteral("instance_id")).toString());
+    }
+    return review.value(QStringLiteral("skipped_clips")) == total - captioned.size() ? QString() : invalid();
+}

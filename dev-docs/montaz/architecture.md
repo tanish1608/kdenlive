@@ -115,8 +115,10 @@ low-quality windows excluded. Plans use distinct usable ranges, opening/detail/
 activity/ending guidance, and per-shot reasons. Sampled analysis cannot guarantee
 frame-perfect motion or good storytelling. Instrumental music can follow an
 applied visual edit; a separate reviewed local refinement can move cuts to energy
-accents within native source limits. Speech,
-beat/phrase alignment, framing, transitions and subtitle style operations remain pending. Portrait framing is deferred by the user.
+accents within native source limits. Reviewed speech recognition and native caption
+style presets are implemented below. Narration, word alignment, beat/phrase
+alignment, framing and transitions remain pending. Portrait framing is deferred
+by the user.
 
 Optional editorial review metadata accompanies the existing insertion contract;
 native validation binds its shot identities and durations to the proposal. The UI
@@ -185,3 +187,28 @@ apply audio; Listen and native Apply/one Undo remain separate. A changed source 
 sequence invalidates the review. Structured logs include cache/cue counts and
 model identity, never observations, prompts or file paths. Progress and clean
 worker exit are required even for zero suggestions; Stop discards late results.
+
+
+## Selected-audio caption boundary
+
+`captions.py` recognizes only editor-issued placed original audio intervals and
+selected absolute stream indices. It does not use visual descriptions to infer
+speech. Normalized PCM speech evidence is cached separately from silent-video
+observations; silence and absent audio terminate locally without Gemini setup.
+Recognition returns bounded plain text and approximate millisecond intervals,
+converted to the native rational frame grid. The reviewed caption envelope
+carries original-source hashes and project/sequence/revision identity, never a
+path or arbitrary subtitle markup to execute.
+
+`EditorAdapter` rechecks source identities, exact original audio selection and an
+empty writable subtitle model before native insertion. Kdenlive's subtitle model
+allocates IDs, manages timing, rendering, files and native Undo. Its undoable add
+helper now returns actual insertion/removal failures. The assistant batches
+native commands with rollback and commits one Undo only after complete success.
+Subtitle edits invalidate outstanding reviews. Clean/Bold presets use the native
+global force-style property; clearing it restores saved per-event styles without
+recreating events. Empty recognition creates no subtitle model. Recognition and
+style presets are bounded prototypes; neither establishes word timing accuracy.
+Headless project loading initializes the native subtitle model directly when no
+main window exists; desktop loading retains the existing subtitle editor path.
+Both paths preserve native subtitle properties for rendering.

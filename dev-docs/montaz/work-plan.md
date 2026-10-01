@@ -88,9 +88,16 @@ including portrait/landscape, variable frame rates and sub-second shots. A
    separately before native Apply. Live Goa verification is recorded in the
    quality review. Beat/phrase analysis, ducking and native fade-effect proposals
    remain pending.
-3. **Narration and captions:** separately cached speech evidence, per-project mode,
-   native subtitle styles. Silent footage must skip speech-only jobs. Test style
-   switching without subtitle duplication or timing drift.
+3. **Narration and captions — first iteration:** separately cached selected-audio
+   speech recognition, local silence skipping, terminal empty reviews, reviewed
+   native subtitle batches and Clean/Bold/Original render presets are implemented.
+   Native tests cover one Undo/Redo, stable subtitle IDs/text/timing across repeated
+   styles, source changes and insertion failures; transport tests cover Stop,
+   progress completeness and clean exits. A controlled speech fixture verified
+   live recognition, cached retry, native Apply/Undo/Redo, style switching,
+   save/reopen and desktop/command-line exports. Headless subtitle loading no
+   longer dereferences an absent main window. Word alignment, narration generation,
+   processed/overlapping audio and per-project dialogue modes remain pending.
 4. **Quality review:** one bounded revision, honest unavailable/failed states,
    mixed-media regressions and exported output review. Publication comes later.
 

@@ -79,6 +79,16 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     m_align->setToolTip(i18n("Review small cut shifts to accents in your existing assistant music."));
     soundActions->addWidget(m_align);
     layout->addLayout(soundActions);
+    m_captions = new QPushButton(i18n("Captions"), this);
+    m_captions->setToolTip(i18n("Recognize placed original audio or change the appearance of existing captions."));
+    auto captionsMenu = new QMenu(m_captions);
+    captionsMenu->addAction(i18n("Generate captions"), this, &AssistantWidget::generateCaptions);
+    captionsMenu->addSeparator();
+    captionsMenu->addAction(i18n("Clean caption style"), this, [this]() { changeCaptionStyle(QStringLiteral("clean")); });
+    captionsMenu->addAction(i18n("Bold caption style"), this, [this]() { changeCaptionStyle(QStringLiteral("bold")); });
+    captionsMenu->addAction(i18n("Original caption styles"), this, [this]() { changeCaptionStyle(QStringLiteral("original")); });
+    m_captions->setMenu(captionsMenu);
+    layout->addWidget(m_captions);
     connect(m_align, &QPushButton::clicked, this, &AssistantWidget::refineTiming);
     connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
     m_tasks = new QTreeWidget(this);
@@ -165,6 +175,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_music->setEnabled(!busy);
         m_effect->setEnabled(!busy);
         m_align->setEnabled(!busy);
+        m_captions->setEnabled(!busy);
         m_stop->setEnabled(busy);
         m_newBrief->setEnabled(!busy);
         m_chat->setBusy(busy);
@@ -184,7 +195,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(i18n("Stopped"));
-        reply(m_cueMode      ? i18n("Stopped. No sound was generated or applied; your timeline stays unchanged.")
+        reply(m_captionMode  ? i18n("Stopped. No captions were applied. Completed speech results are kept for reuse.")
+              : m_cueMode    ? i18n("Stopped. No sound was generated or applied; your timeline stays unchanged.")
               : m_timingMode ? i18n("Stopped. Your cuts and music stay unchanged.")
               : m_effectMode ? i18n("Stopped. No sound was applied. Completed audio is kept for reuse; ElevenLabs may still finish a submitted request.")
               : m_musicMode  ? i18n("Stopped. No audio was applied. Completed music is kept for reuse; ElevenLabs may still finish a submitted request.")
@@ -194,6 +206,17 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (m_activeTask < 0) return;
         clearProposal();
         finishTasks(code == QStringLiteral("no_alignment_needed") ? i18n("No change") : i18n("Failed"));
+        if (m_captionMode) {
+            if (code == QStringLiteral("missing_api_key"))
+                reply(i18n("Gemini is not configured. Set GEMINI_API_KEY or gemini_api_key in the private assistant settings."));
+            else if (code == QStringLiteral("provider_auth") || code == QStringLiteral("invalid_settings"))
+                reply(i18n("Gemini rejected its configuration. Check your API key and model. No captions were applied."));
+            else if (code == QStringLiteral("provider_timeout") || code == QStringLiteral("worker_timeout") || code == QStringLiteral("media_timeout"))
+                reply(i18n("Caption recognition timed out. No captions were applied; completed speech results are kept for reuse."));
+            else
+                reply(i18n("Captions could not be prepared. Check source audio and Run logs. No captions were applied."));
+            return;
+        }
         if (m_cueMode) {
             if (code == QStringLiteral("analysis_unavailable"))
                 reply(i18n("No current cached visual evidence is available. Analyze the footage with the visual planner first. No sound was generated."));
@@ -253,6 +276,12 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             reply(i18n("Planning could not finish. Check your source files and unlocked video tracks. No edit was applied."));
     });
     connect(m_worker, &WorkerClient::eventReceived, this, [this](const QJsonObject &event) {
+        if (event.value(QStringLiteral("type")) == QStringLiteral("caption_progress")) {
+            m_status->setText(i18n("Checking speech · %1 of %2 audio clips · %3 cached · %4 without speech", event.value(QStringLiteral("completed")).toInt(),
+                                   event.value(QStringLiteral("total")).toInt(), event.value(QStringLiteral("cached")).toInt(),
+                                   event.value(QStringLiteral("skipped")).toInt()));
+            return;
+        }
         if (event.value(QStringLiteral("type")) == QStringLiteral("cue_progress")) {
             const int completed = event.value(QStringLiteral("completed")).toInt(), total = event.value(QStringLiteral("total")).toInt();
             m_status->setText(i18n("Reusing visual evidence · %1 of %2 sources checked", completed, total));
@@ -386,6 +415,49 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         reply(m_effectMode ? i18n("Your sound effect is ready. Listen and review it, then apply at the reviewed position as one undoable edit.")
                            : i18n("Your instrumental is ready. Apply adds it to a free audio track as one undoable edit. Existing audio stays in place."));
     });
+    connect(m_worker, &WorkerClient::captionsReady, this, [this](const QJsonObject &review) {
+        if (m_adapter->snapshot() != m_snapshot || m_adapter->captionRequest() != m_captionSpec ||
+            !validateCaptions(m_snapshot, m_captionSpec, review).isEmpty()) {
+            clearProposal();
+            finishTasks(i18n("Outdated"));
+            reply(i18n("The audio or sequence changed. Request fresh captions."));
+            return;
+        }
+        const auto captions = review.value(QStringLiteral("captions")).toArray();
+        if (captions.isEmpty()) {
+            clearProposal();
+            finishTasks(i18n("No speech"));
+            reply(i18n("No speech to caption. Only placed original audio is checked; video-only footage and assistant music or effects do not need captions."));
+            return;
+        }
+        m_captionReview = review;
+        const auto rate = m_snapshot.value(QStringLiteral("frame_rate")).toObject();
+        const double unit = double(rate.value(QStringLiteral("denominator")).toInt()) / rate.value(QStringLiteral("numerator")).toInt();
+        for (const auto v : captions) {
+            const auto c = v.toObject();
+            m_preview->addItem(
+                i18n("%1–%2 s · %3", QString::number(c.value(QStringLiteral("start_frame")).toInt() * unit, 'f', 2),
+                     QString::number((c.value(QStringLiteral("start_frame")).toInt() + c.value(QStringLiteral("duration_frames")).toInt()) * unit, 'f', 2),
+                     c.value(QStringLiteral("text")).toString()));
+            m_preview->item(m_preview->count() - 1)
+                ->setData(Qt::UserRole, i18n("%1\nSpeech timing is approximate. Review wording and timing, then refine with Kdenlive’s subtitle editor.",
+                                             c.value(QStringLiteral("text")).toString()));
+        }
+        m_preview->setCurrentRow(0);
+        m_previewCard->setTitle(i18n("Proposed captions"));
+        m_apply->setText(i18n("Apply captions"));
+        m_apply->setEnabled(true);
+        m_previewCard->show();
+        setTask(0, i18n("Done"));
+        setTask(1, i18n("Done"));
+        setTask(2, i18n("Ready"));
+        m_activeTask = 2;
+        reply(i18np("One caption is ready; %2 audio results were reused. Review the exact words and approximate timing. Apply adds editable native subtitles "
+                    "as one undoable edit.",
+                    "%1 captions are ready; %2 audio results were reused. Review the exact words and approximate timing. Apply adds editable native subtitles "
+                    "as one undoable edit.",
+                    captions.size(), review.value(QStringLiteral("cached_clips")).toInt()));
+    });
     connect(m_worker, &WorkerClient::soundCuesReady, this, [this](const QJsonObject &review) {
         if (m_adapter->snapshot() != m_snapshot || !validateSoundCues(m_snapshot, m_cueSpec, review).isEmpty()) {
             clearProposal();
@@ -460,6 +532,22 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                     m_preview->count()));
     });
     connect(m_apply, &QPushButton::clicked, this, [this]() {
+        if (!m_captionReview.isEmpty()) {
+            const auto review = m_captionReview;
+            m_applying = true;
+            const auto result = m_adapter->applyCaptions(m_snapshot, m_captionSpec, review);
+            m_applying = false;
+            m_worker->recordApply(review.value(QStringLiteral("request_id")).toString(), result);
+            clearProposal();
+            setTask(2, i18n("Done"));
+            setTask(3, result.isEmpty() ? i18n("Done") : i18n("Failed"));
+            m_activeTask = -1;
+            reply(result.isEmpty()
+                      ? i18n("Captions added. One Undo removes all added captions. Use Caption style to change their appearance without changing timing.")
+                  : result == QStringLiteral("rollback_failed") ? i18n("The caption edit could not be fully reverted. Reopen the project before trying again.")
+                                                                : i18n("Captions could not be applied. Request a fresh review."));
+            return;
+        }
         if (!m_cueReview.isEmpty()) {
             const auto spec = m_adapter->effectFromCue(m_snapshot, m_cueSpec, m_cueReview, m_preview->currentRow());
             if (spec.isEmpty()) {
@@ -517,7 +605,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     connect(m_adapter, &EditorAdapter::invalidated, this, [this]() {
         if (m_applying) return;
-        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty() || m_worker->busy()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty() || !m_captionReview.isEmpty() ||
+            m_worker->busy()) {
             const bool busy = m_worker->busy();
             clearProposal();
             if (busy) m_worker->stop();
@@ -537,7 +626,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     contextTimer->start();
     const auto briefChanged = [this]() {
-        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty()) {
+        if (!m_proposal.isEmpty() || !m_soundtrack.isEmpty() || !m_timingProposal.isEmpty() || !m_cueReview.isEmpty() || !m_captionReview.isEmpty()) {
             clearProposal();
             finishTasks(i18n("Outdated"));
             reply(i18n("Editing style or duration changed. Send a message to request a new plan."));
@@ -555,6 +644,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
     m_effectMode = false;
     m_cueMode = false;
     m_timingMode = false;
+    m_captionMode = false;
     const QStringList taskNames{i18n("Understand footage"), i18n("Arrange the story"), i18n("Review proposed shots"), i18n("Apply to timeline")};
     for (int row = 0; row < 4; ++row)
         m_tasks->topLevelItem(row)->setText(0, taskNames[row]);
@@ -595,8 +685,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
     m_activeTask = 0;
     setTask(0, i18n("Working"));
     reply(i18n("I’ll analyze your footage, arrange a visual story, and show the proposed shots. Apply appends them as one undoable edit. Use Add music after "
-               "applying. Captions "
-               "are not added yet."));
+               "applying, and Captions when original speech audio is on the timeline."));
     m_status->setText(i18n("Analyzing footage…"));
 }
 
@@ -641,6 +730,8 @@ void Montaz::AssistantWidget::clearProposal()
     m_timingProposal = {};
     m_cueSpec = {};
     m_cueReview = {};
+    m_captionSpec = {};
+    m_captionReview = {};
     m_listen->setChecked(false);
     m_audioPreview->stop();
     m_audioPreview->setSource({});
@@ -661,6 +752,7 @@ void Montaz::AssistantWidget::composeMusic()
     m_effectMode = false;
     m_cueMode = false;
     m_timingMode = false;
+    m_captionMode = false;
     m_musicSpec = m_adapter->musicRequest(m_recipe->currentData().toString(), m_brief);
     m_snapshot = m_adapter->snapshot();
     m_contextKey = m_adapter->contextKey();
@@ -688,6 +780,7 @@ void Montaz::AssistantWidget::refineTiming()
     clearProposal();
     finishTasks(i18n("Superseded"));
     m_timingMode = true;
+    m_captionMode = false;
     m_musicMode = false;
     m_effectMode = false;
     m_cueMode = false;
@@ -746,6 +839,7 @@ void Montaz::AssistantWidget::beginEffect(const QJsonObject &spec)
     m_effectMode = true;
     m_musicMode = true;
     m_timingMode = false;
+    m_captionMode = false;
     m_musicSpec = spec;
     m_snapshot = m_adapter->snapshot();
     m_contextKey = m_adapter->contextKey();
@@ -776,6 +870,7 @@ void Montaz::AssistantWidget::suggestSounds()
     m_musicMode = false;
     m_effectMode = false;
     m_timingMode = false;
+    m_captionMode = false;
     m_cueSpec = m_adapter->cueRequest();
     m_snapshot = m_adapter->snapshot();
     m_contextKey = m_adapter->contextKey();
@@ -807,4 +902,52 @@ void Montaz::AssistantWidget::suggestSounds()
     m_tasks->show();
     reply(i18n("I’ll reuse cached observations for the selected footage and ask Gemini for a few sound opportunities. Missing analyses are skipped; no footage "
                "is reanalyzed and no sound is generated yet."));
+}
+
+void Montaz::AssistantWidget::generateCaptions()
+{
+    clearProposal();
+    finishTasks(i18n("Superseded"));
+    m_captionMode = true;
+    m_cueMode = m_musicMode = m_effectMode = m_timingMode = false;
+    m_captionSpec = m_adapter->captionRequest();
+    m_snapshot = m_adapter->snapshot();
+    m_contextKey = m_adapter->contextKey();
+    if (m_captionSpec.isEmpty()) {
+        reply(i18n("Start with an empty, unlocked, enabled subtitle track and up to eight non-overlapping original audio clips, each at most 30 seconds and "
+                   "120 seconds in total. Audio must have normal speed and no clip or track effects or transitions."));
+        return;
+    }
+    QSet<QString> selected;
+    for (const auto v : m_captionSpec.value(QStringLiteral("clips")).toArray())
+        selected.insert(v.toObject().value(QStringLiteral("bin_id")).toString());
+    const auto sources = m_adapter->audioSources(m_snapshot, selected);
+    if (sources.size() != selected.size() ||
+        !m_worker->start(m_snapshot, {{QStringLiteral("captions"), m_captionSpec}, {QStringLiteral("sources"), sources}})) {
+        reply(i18n("Captions could not start. Check the placed audio and source files."));
+        return;
+    }
+    const QStringList tasks{i18n("Check placed audio"), i18n("Recognize speech"), i18n("Review captions"), i18n("Apply captions")};
+    for (int row = 0; row < 4; ++row) {
+        m_tasks->topLevelItem(row)->setText(0, tasks[row]);
+        setTask(row, i18n("Waiting"));
+    }
+    m_activeTask = 0;
+    setTask(0, i18n("Working"));
+    m_tasks->show();
+    reply(i18n("I’ll check placed original audio for speech. Silent clips finish locally; other eligible audio is sent to Gemini. Captions appear for review "
+               "before anything is added."));
+}
+
+void Montaz::AssistantWidget::changeCaptionStyle(const QString &preset)
+{
+    if (m_worker->busy()) return;
+    clearProposal();
+    finishTasks(i18n("Superseded"));
+    m_applying = true;
+    const auto result = m_adapter->captionStyle(preset);
+    m_applying = false;
+    reply(result.isEmpty() ? i18n("Caption appearance updated. Text and timing are preserved; Undo restores the previous appearance. Original restores each "
+                                  "caption’s saved style.")
+                           : i18n("Add captions and enable and unlock their track before changing the style."));
 }

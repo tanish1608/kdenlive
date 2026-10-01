@@ -160,3 +160,37 @@ The combined audio measures **-17.9 LUFS / -4.7 dBFS true peak**, without clippi
 The source footage, previous projects and exports are preserved outside Git.
 Portrait framing is still deferred. Speech/ducking, captions, perceptual listening
 review, broader categories and cue selection on complex timelines remain open.
+
+## Reviewed caption checkpoint
+
+The separate `goa-captions-review.kdenlive` tests captions with a controlled
+5.205-second synthetic spoken sentence placed as original audio. Its black prefix
+comes from manual fixture insertion; this is caption integration evidence, not
+a revised travel film. The original Goa footage and earlier projects are intact.
+
+On the video-only/assistant-sound edit, Generate captions finished with zero
+eligible audio and no Gemini call or working tasks. On the speech fixture, live
+recognition completed in 3.94 seconds and returned the scripted words with
+approximate segment timing. A second run reused one cached recognition. Native
+Apply created one caption at frame 0 for 153 frames; one Undo removed it and Redo
+restored it. Saving/reopening retained the event and readable two-line rendering.
+
+Clean, Bold, Undo to Clean, Redo to Bold and Original were exercised in the
+desktop. Clean/Bold use scaled native force styles; Original clears the override.
+The ASS file remained byte-for-byte identical throughout style changes: one
+event, unchanged text and timing. The test ends with Original appearance.
+
+Desktop `~/Movies/goa-captions-review.mp4` and command-line
+`~/Movies/goa-captions-headless-review.mp4` both contain **474 decoded frames**,
+1920×1080 at 30000/1001 FPS. Both exports display the caption clearly. Desktop
+frame 152 contains its lettering and frame 153 does not, matching the reviewed
+exclusive end. The initial command-line attempt exposed a null-main-window crash
+while loading native subtitle properties; direct headless model initialization
+fixes it, with a native regression and successful export retry.
+
+114 Python, 32 Qt transport and 7 chat checks, plus native `assistanttest` and
+upstream `subtitlestest`, pass. Recognition is not verified word alignment; the
+energy gate is not voice detection. Narration, processed/overlapping dialogue,
+ducking and perceptual editorial review remain pending. Qt/macOS accessibility
+inspection can still crash on dynamic UI; that separate SDK issue is unresolved.
+All fixture media, logs, projects, caches and exports remain outside Git.

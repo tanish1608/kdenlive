@@ -28,6 +28,8 @@ private:
     void clearProposal();
     void composeMusic();
     void composeEffect();
+    void generateCaptions();
+    void changeCaptionStyle(const QString &preset);
     void suggestSounds();
     void beginEffect(const QJsonObject &spec);
     void refineTiming();
@@ -44,6 +46,10 @@ private:
     QPushButton *m_music;
     QPushButton *m_effect;
     QPushButton *m_align;
+    QPushButton *m_captions;
+    bool m_captionMode{false};
+    QJsonObject m_captionSpec;
+    QJsonObject m_captionReview;
     bool m_timingMode{false};
     QJsonObject m_timingSpec;
     QJsonObject m_timingProposal;

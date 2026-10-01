@@ -82,7 +82,8 @@ footage paths/descriptions/briefs/shot reasons and provider stderr are excluded.
 
 Gemini uses the official [GenerateContent REST API](https://ai.google.dev/api/generate-content)
 with JSON output, followed by strict local/native validation. Narration, source
-audio pairing, subtitle styling, and beat-based editing remain pending.
+audio pairing and beat-based editing remain pending. Reviewed speech captions and
+native subtitle presets are described below.
 
 ## Instrumental music
 
@@ -201,3 +202,46 @@ Protocol v1 deliberately supports only insertion. Mixing, subtitles, effects,
 trim/move, linked AV groups, and replacement proposals require explicit contract
 extensions plus native tests. A successful validation is not an editor apply
 acknowledgment or an assessment of editorial quality.
+
+## Reviewed speech captions
+
+Choose **Captions → Generate captions** after placing original audio on the
+native timeline. Only audible AudioOnly clips on audio tracks are eligible;
+imported video audio, muted/disabled audio, assistant music and effects are
+excluded. This first iteration supports an empty, unlocked, enabled subtitle
+track and up to eight non-overlapping audio clips, each no longer than 30 seconds
+and 120 seconds total, with normal speed and no clip/track effects or mixes.
+Sources must be readable local files no larger than 128 MiB. Unsupported edits
+are explained before recognition; existing subtitles are never replaced.
+
+The worker decodes only each selected source interval/stream to bounded 16 kHz
+mono PCM. An RMS energy gate skips silence locally without requiring Gemini
+configuration. Other eligible audio uses the configured Gemini
+[audio GenerateContent API](https://ai.google.dev/gemini-api/docs/generate-content/audio).
+This is model speech recognition, not verified voice detection or forced word
+alignment. Music, noise and uncertain speech may return an empty result.
+**No speech to caption** is terminal, creates no subtitle track and leaves no
+working task. Decode failures are errors, not silence.
+
+Native subtitles render through both desktop and command-line export. Headless
+project loading restores their model and properties without opening a UI.
+
+Speech evidence has its own `montaz/analysis/speech` cache, keyed by normalized
+PCM content, Gemini model and caption schema version. Valid empty recognition
+results are reusable. Atomic owner-only writes retain completed evidence after
+Stop; invalid or interrupted results are not cached. Recognition text stays out
+of run logs. Progress logs include checked, cached, skipped and caption counts.
+
+Review the exact words and approximate timing before **Apply captions**. Source
+hashes, native clips, sequence revision, rational FPS, text and frame bounds are
+rechecked before a single native undoable subtitle batch. One Undo removes the
+added events; an empty native subtitle lane can remain. The native insertion
+helper now propagates add/remove failures so failed batches can roll back.
+
+**Clean caption style**, **Bold caption style**, and **Original caption styles**
+use Kdenlive's global subtitle rendering override with one native Undo. They do
+not recreate caption events or change IDs, text or timing. Presets affect all
+current captions; Original clears the override to restore their individual saved
+styles. Refine recognition and timing in Kdenlive's subtitle editor. Animated
+word captions, narrator generation, overlapping/processed audio and forced
+alignment remain future work.

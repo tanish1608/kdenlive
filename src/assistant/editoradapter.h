@@ -21,6 +21,10 @@ public:
     QString contextKey();
     QJsonObject snapshot();
     QJsonObject mediaSources(const QJsonObject &snapshot, const QSet<QString> &selected = {});
+    QJsonObject captionRequest();
+    QJsonObject audioSources(const QJsonObject &snapshot, const QSet<QString> &selected);
+    QString applyCaptions(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);
+    QString captionStyle(const QString &preset);
     QJsonObject cueRequest();
     QJsonObject effectFromCue(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review, int index);
     QJsonObject timingRequest();
@@ -35,6 +39,7 @@ Q_SIGNALS:
 
 private:
     void bind();
+    void watchSubtitles(const std::shared_ptr<TimelineItemModel> &timeline);
     void invalidate();
     QPointer<KdenliveDoc> m_document;
     std::weak_ptr<TimelineItemModel> m_timeline;

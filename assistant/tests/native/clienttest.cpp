@@ -153,6 +153,36 @@ QJsonObject cueReview()
                                             {"source_sha256", QString(64, 'a')}}}}};
 }
 
+QJsonObject captionSpec()
+{
+    return {{"clips", QJsonArray{QJsonObject{{"instance_id", "spoken"},
+                                             {"bin_id", "1"},
+                                             {"track_id", "2"},
+                                             {"start_frame", 100},
+                                             {"in_frame", 30},
+                                             {"duration_frames", 90},
+                                             {"audio_stream", 0}}}}};
+}
+QJsonObject captionSnapshot()
+{
+    auto value = snapshot();
+    value["occupied"] = QJsonArray{QJsonObject{{"instance_id", "spoken"}, {"track_id", "2"}, {"start_frame", 100}, {"duration_frames", 90}}};
+    return value;
+}
+QJsonObject captionReview()
+{
+    return {{"request_id", "request"},
+            {"project_id", "project"},
+            {"sequence_id", "sequence"},
+            {"base_revision", 2},
+            {"frame_rate", snapshot()["frame_rate"]},
+            {"checked_clips", 1},
+            {"cached_clips", 0},
+            {"skipped_clips", 0},
+            {"source_sha256", QJsonObject{{"1", QString(64, 'a')}}},
+            {"captions", QJsonArray{QJsonObject{{"instance_id", "spoken"}, {"start_frame", 102}, {"duration_frames", 46}, {"text", "Private spoken words"}}}}};
+}
+
 void fakeWorker(const QString &path, const QByteArray &script)
 {
     QVERIFY(QDir().mkpath(path + QStringLiteral("/montaz_assistant")));
@@ -172,6 +202,123 @@ private Q_SLOTS:
         QStandardPaths::setTestModeEnabled(true);
     }
     void cleanupTestCase() { QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).removeRecursively(); }
+    void captionsBindAudioSourceNativeIntervalsAndSafeText()
+    {
+        QVERIFY(Montaz::validateCaptionRequest(captionSnapshot(), captionSpec()).isEmpty());
+        QVERIFY(Montaz::validateCaptions(captionSnapshot(), captionSpec(), captionReview()).isEmpty());
+        for (const auto &change :
+             {QJsonObject{{"instance_id", "missing"}}, QJsonObject{{"start_frame", 99}}, QJsonObject{{"duration_frames", 89}},
+              QJsonObject{{"duration_frames", true}}, QJsonObject{{"text", "{override}"}}, QJsonObject{{"text", "back\\slash"}}, QJsonObject{{"text", ""}}}) {
+            auto review = captionReview();
+            auto caption = review["captions"].toArray()[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                caption[it.key()] = it.value();
+            review["captions"] = QJsonArray{caption};
+            QVERIFY(!Montaz::validateCaptions(captionSnapshot(), captionSpec(), review).isEmpty());
+        }
+        for (const auto &change : {QJsonObject{{"base_revision", 3}}, QJsonObject{{"checked_clips", 0}}, QJsonObject{{"skipped_clips", 1}},
+                                   QJsonObject{{"source_sha256", QJsonObject{}}}}) {
+            auto review = captionReview();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                review[it.key()] = it.value();
+            QVERIFY(!Montaz::validateCaptions(captionSnapshot(), captionSpec(), review).isEmpty());
+        }
+        // Outward rounding can add one frame to a six-second fractional-offset segment.
+        auto longSnapshot = captionSnapshot();
+        auto occupancy = longSnapshot["occupied"].toArray()[0].toObject();
+        occupancy["duration_frames"] = 200;
+        longSnapshot["occupied"] = QJsonArray{occupancy};
+        auto longSpec = captionSpec();
+        auto longClip = longSpec["clips"].toArray()[0].toObject();
+        longClip["duration_frames"] = 200;
+        longSpec["clips"] = QJsonArray{longClip};
+        auto longReview = captionReview();
+        auto longCaption = longReview["captions"].toArray()[0].toObject();
+        longCaption["duration_frames"] = 181;
+        longReview["captions"] = QJsonArray{longCaption};
+        QVERIFY(Montaz::validateCaptions(longSnapshot, longSpec, longReview).isEmpty());
+        longCaption["duration_frames"] = 182;
+        longReview["captions"] = QJsonArray{longCaption};
+        QVERIFY(!Montaz::validateCaptions(longSnapshot, longSpec, longReview).isEmpty());
+        auto spec = captionSpec();
+        auto clip = spec["clips"].toArray()[0].toObject();
+        clip["audio_stream"] = 64;
+        spec["clips"] = QJsonArray{clip};
+        QVERIFY(!Montaz::validateCaptionRequest(captionSnapshot(), spec).isEmpty());
+        auto review = captionReview();
+        review["captions"] = QJsonArray{};
+        review["skipped_clips"] = 1;
+        QVERIFY(Montaz::validateCaptions(captionSnapshot(), captionSpec(), review).isEmpty());
+    }
+    void captionsRequireCompleteProgressCleanExitAndDiscardResultsOnStop()
+    {
+        const QByteArray script = R"PY(import json,sys,signal,time
+r=json.loads(sys.stdin.readline())
+def send(x): print(json.dumps({'version':1,**x}),flush=True)
+send({'type':'ready'})
+for n in (1,2): send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'captions','status':'running','reason':''})
+FAULT
+send({'type':'caption_progress','completed':1,'cached':0,'skipped':0,'total':1})
+for n in (3,4): send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==4 else 'captions','status':'completed','reason':''})
+s=r['snapshot']
+p=dict(request_id=r['request_id'],project_id=s['project_id'],sequence_id=s['sequence_id'],base_revision=s['revision'],frame_rate=s['frame_rate'],checked_clips=1,cached_clips=0,skipped_clips=0,source_sha256={'1':'a'*64},captions=[dict(instance_id='spoken',start_frame=102,duration_frames=46,text='Private spoken words')])
+CHANGE
+send({'type':'captions','review':p})
+EXIT
+)PY";
+        for (int fault = 0; fault < 7; ++fault) {
+            auto worker = script;
+            worker.replace("FAULT", fault == 6 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)" : "pass");
+            worker.replace("CHANGE", fault == 1   ? "p['captions']=[];p['skipped_clips']=1"
+                                     : fault == 2 ? "p['base_revision']=3"
+                                     : fault == 4 ? "p['cached_clips']=1"
+                                                  : "pass");
+            if (fault == 1) worker.replace("'skipped':0", "'skipped':1");
+            if (fault == 3) worker.replace("'completed':1", "'completed':0");
+            worker.replace("EXIT", fault == 5 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::captionsReady), failures(&client, &Montaz::WorkerClient::failed),
+                stopped(&client, &Montaz::WorkerClient::stopped);
+            QVERIFY(client.start(captionSnapshot(), {{"captions", captionSpec()}, {"sources", QJsonObject{{"1", "/private/speech.wav"}}}}));
+            if (fault == 6) {
+                QTest::qWait(100);
+                client.stop();
+            }
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 3000);
+            QCOMPARE(ready.count(), fault < 2 ? 1 : 0);
+            QCOMPARE(failures.count(), fault >= 2 && fault < 6 ? 1 : 0);
+            QCOMPARE(stopped.count(), fault == 6 ? 1 : 0);
+        }
+        const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+        for (const auto &name : QDir(directory).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+            QFile log(directory + name);
+            QVERIFY(log.open(QIODevice::ReadOnly));
+            const auto bytes = log.readAll();
+            QVERIFY(!bytes.contains("Private spoken words"));
+            QVERIFY(!bytes.contains("speech.wav"));
+            QVERIFY(!bytes.contains("source_sha256"));
+        }
+    }
+    void noPlacedAudioCompletesRealWorkerWithoutGeminiSettings()
+    {
+        QTemporaryDir temp;
+        const auto oldKey = qgetenv("GEMINI_API_KEY"), oldConfig = qgetenv("MONTAZ_ASSISTANT_CONFIG");
+        const auto restore = qScopeGuard([oldKey, oldConfig]() {
+            qputenv("GEMINI_API_KEY", oldKey);
+            qputenv("MONTAZ_ASSISTANT_CONFIG", oldConfig);
+        });
+        qputenv("GEMINI_API_KEY", "");
+        qputenv("MONTAZ_ASSISTANT_CONFIG", (temp.path() + QStringLiteral("/missing.json")).toUtf8());
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), qEnvironmentVariable("MONTAZ_TEST_SOURCE"));
+        QSignalSpy ready(&client, &Montaz::WorkerClient::captionsReady), failures(&client, &Montaz::WorkerClient::failed);
+        QVERIFY(client.start(snapshot(), {{"captions", QJsonObject{{"clips", QJsonArray{}}}}, {"sources", QJsonObject{}}}));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 5000);
+        QCOMPARE(failures.count(), 0);
+        QCOMPARE(ready.count(), 1);
+        QVERIFY(ready[0][0].toJsonObject()["captions"].toArray().isEmpty());
+    }
     void validAndReplay()
     {
         QVERIFY(Montaz::validateProposal(snapshot(), proposal()).isEmpty());

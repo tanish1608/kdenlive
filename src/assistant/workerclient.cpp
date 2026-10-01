@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcessEnvironment>
@@ -61,6 +62,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_review = {};
     m_soundtrack = {};
     m_cueReview = {};
+    m_captionReview = {};
     m_buffer.clear();
     m_sequence = 0;
     m_outputBytes = 0;
@@ -69,19 +71,25 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_completed = false;
     m_cancelled = false;
     m_effectRequest = context.contains(QStringLiteral("effect"));
+    m_captionRequest = context.contains(QStringLiteral("captions"));
+    m_captionSpec = context.value(QStringLiteral("captions")).toObject();
+    m_progressSkipped = 0;
+    m_captionProgressReceived = false;
     m_cueRequest = context.contains(QStringLiteral("cues"));
     m_cueSpec = context.value(QStringLiteral("cues")).toObject();
     m_cueReview = {};
+    m_captionReview = {};
     m_musicRequest = context.contains(QStringLiteral("music")) || m_effectRequest;
     m_timingRequest = context.contains(QStringLiteral("timing"));
     m_timingSpec = context.value(QStringLiteral("timing")).toObject();
-    m_mediaRequest = !context.isEmpty() && !m_musicRequest && !m_timingRequest && !m_cueRequest;
+    m_mediaRequest = !context.isEmpty() && !m_musicRequest && !m_timingRequest && !m_cueRequest && !m_captionRequest;
     m_musicPhase = 0;
     m_musicSpec = context.value(m_effectRequest ? QStringLiteral("effect") : QStringLiteral("music")).toObject();
     m_planningProgressReceived = false;
     m_progressCompleted = m_progressCached = 0;
     QJsonObject request{{QStringLiteral("version"), 1},
-                        {QStringLiteral("type"), m_cueRequest      ? QStringLiteral("suggest_sounds")
+                        {QStringLiteral("type"), m_captionRequest  ? QStringLiteral("propose_captions")
+                                                 : m_cueRequest    ? QStringLiteral("suggest_sounds")
                                                  : m_timingRequest ? QStringLiteral("refine_timing")
                                                  : m_effectRequest ? QStringLiteral("compose_effect")
                                                  : m_musicRequest  ? QStringLiteral("compose_music")
@@ -89,7 +97,20 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
                                                                    : QStringLiteral("plan_demo")},
                         {QStringLiteral("request_id"), m_requestId},
                         {QStringLiteral("snapshot"), snapshot}};
-    if (m_cueRequest) {
+    if (m_captionRequest) {
+        if (context.size() != 2 || !context.value(QStringLiteral("sources")).isObject() || !validateCaptionRequest(snapshot, m_captionSpec).isEmpty())
+            return false;
+        QSet<QString> bins;
+        for (const auto v : m_captionSpec.value(QStringLiteral("clips")).toArray())
+            bins.insert(v.toObject().value(QStringLiteral("bin_id")).toString());
+        const auto sources = context.value(QStringLiteral("sources")).toObject();
+        const auto keys = sources.keys();
+        if (QSet<QString>(keys.begin(), keys.end()) != bins) return false;
+        for (const auto v : sources)
+            if (!v.isString() || v.toString().size() > 4096 || !QFileInfo(v.toString()).isAbsolute()) return false;
+        request.insert(QStringLiteral("captions"), m_captionSpec);
+        request.insert(QStringLiteral("sources"), sources);
+    } else if (m_cueRequest) {
         if (context.size() != 2 || !context.value(QStringLiteral("sources")).isObject() || !validateCueRequest(snapshot, m_cueSpec).isEmpty()) return false;
         QSet<QString> bins;
         for (const auto v : m_cueSpec.value(QStringLiteral("clips")).toArray())
@@ -125,7 +146,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_busy = true;
     record(QStringLiteral("started"), {{QStringLiteral("assets"), snapshot.value(QStringLiteral("assets")).toArray().size()},
                                        {QStringLiteral("revision"), snapshot.value(QStringLiteral("revision"))}});
-    m_deadline.start(m_mediaRequest || m_musicRequest || m_cueRequest ? 180000 : m_defaultDeadline);
+    m_deadline.start(m_mediaRequest || m_musicRequest || m_cueRequest || m_captionRequest ? 180000 : m_defaultDeadline);
     Q_EMIT busyChanged(true);
     m_process.start();
     m_process.write(line);
@@ -141,6 +162,7 @@ void Montaz::WorkerClient::stop()
     m_review = {};
     m_soundtrack = {};
     m_cueReview = {};
+    m_captionReview = {};
     m_deadline.stop();
     m_process.terminate();
     m_killTimer.start();
@@ -154,6 +176,7 @@ void Montaz::WorkerClient::abort(const QString &code)
     m_review = {};
     m_soundtrack = {};
     m_cueReview = {};
+    m_captionReview = {};
     m_deadline.stop();
     m_process.terminate();
     m_killTimer.start();
@@ -195,7 +218,8 @@ void Montaz::WorkerClient::readOutput()
             const bool runEvent = m_sequence == 1 || m_sequence == 4;
             if (message.size() != 7 || m_sequence > 4 || status != states[m_sequence - 1] ||
                 (runEvent ? !message.value(QStringLiteral("stage")).isNull()
-                          : message.value(QStringLiteral("stage")) != (m_cueRequest      ? QStringLiteral("sound_cues")
+                          : message.value(QStringLiteral("stage")) != (m_captionRequest  ? QStringLiteral("captions")
+                                                                       : m_cueRequest    ? QStringLiteral("sound_cues")
                                                                        : m_timingRequest ? QStringLiteral("timing")
                                                                        : m_effectRequest ? QStringLiteral("effect")
                                                                        : m_musicRequest  ? QStringLiteral("music")
@@ -209,6 +233,11 @@ void Montaz::WorkerClient::readOutput()
                 return;
             }
             if (m_musicRequest && m_sequence == 4 && m_musicPhase != 2) {
+                abort(QStringLiteral("invalid_worker_event"));
+                return;
+            }
+            if (m_captionRequest && m_sequence == 4 &&
+                (!m_captionProgressReceived || m_progressCompleted != m_captionSpec.value(QStringLiteral("clips")).toArray().size())) {
                 abort(QStringLiteral("invalid_worker_event"));
                 return;
             }
@@ -243,6 +272,26 @@ void Montaz::WorkerClient::readOutput()
                                                 {QStringLiteral("completed"), completed},
                                                 {QStringLiteral("cached"), cached},
                                                 {QStringLiteral("total"), total}});
+            Q_EMIT eventReceived(message);
+        } else if (type == QStringLiteral("caption_progress") && m_captionRequest && m_ready && m_sequence == 2 && !m_completed) {
+            const int total = m_captionSpec.value(QStringLiteral("clips")).toArray().size();
+            const int completed = message.value(QStringLiteral("completed")).toInt(-1), cached = message.value(QStringLiteral("cached")).toInt(-1),
+                      skipped = message.value(QStringLiteral("skipped")).toInt(-1);
+            if (message.size() != 6 || message.value(QStringLiteral("total")) != total || completed < m_progressCompleted || completed > total ||
+                cached < m_progressCached || cached > completed || skipped < m_progressSkipped || skipped > completed ||
+                message.value(QStringLiteral("completed")) != completed || message.value(QStringLiteral("cached")) != cached ||
+                message.value(QStringLiteral("skipped")) != skipped) {
+                abort(QStringLiteral("invalid_worker_progress"));
+                return;
+            }
+            m_captionProgressReceived = true;
+            m_progressCompleted = completed;
+            m_progressCached = cached;
+            m_progressSkipped = skipped;
+            record(QStringLiteral("caption_progress"), {{QStringLiteral("completed"), completed},
+                                                        {QStringLiteral("cached"), cached},
+                                                        {QStringLiteral("skipped"), skipped},
+                                                        {QStringLiteral("total"), total}});
             Q_EMIT eventReceived(message);
         } else if (type == QStringLiteral("cue_progress") && m_cueRequest && m_ready && m_sequence == 2 && !m_completed) {
             QSet<QString> bins;
@@ -283,7 +332,10 @@ void Montaz::WorkerClient::readOutput()
             Q_EMIT eventReceived(message);
         } else if (type == QStringLiteral("error") && m_ready && !m_completed && message.size() == 3) {
             const auto code = message.value(QStringLiteral("code")).toString();
-            const QStringList allowed{QStringLiteral("analysis_unavailable"),
+            const QStringList allowed{QStringLiteral("invalid_caption_request"),
+                                      QStringLiteral("invalid_captions"),
+                                      QStringLiteral("invalid_caption_text"),
+                                      QStringLiteral("analysis_unavailable"),
                                       QStringLiteral("invalid_sound_cues"),
                                       QStringLiteral("invalid_cue_request"),
                                       QStringLiteral("missing_effect_key"),
@@ -322,6 +374,18 @@ void Montaz::WorkerClient::readOutput()
                                       QStringLiteral("cancelled")};
             abort(allowed.contains(code) ? code : QStringLiteral("worker_rejected_request"));
             return;
+        } else if (type == QStringLiteral("captions") && m_captionRequest && m_ready && m_completed && m_captionReview.isEmpty() && message.size() == 3) {
+            const auto review = message.value(QStringLiteral("review")).toObject();
+            if (review.value(QStringLiteral("request_id")) != m_requestId || !validateCaptions(m_snapshot, m_captionSpec, review).isEmpty() ||
+                review.value(QStringLiteral("cached_clips")) != m_progressCached || review.value(QStringLiteral("skipped_clips")) != m_progressSkipped) {
+                abort(QStringLiteral("invalid_captions"));
+                return;
+            }
+            m_captionReview = review;
+            record(QStringLiteral("caption_review"), {{QStringLiteral("captions"), review.value(QStringLiteral("captions")).toArray().size()},
+                                                      {QStringLiteral("checked"), m_progressCompleted},
+                                                      {QStringLiteral("cached"), m_progressCached},
+                                                      {QStringLiteral("skipped"), m_progressSkipped}});
         } else if (type == QStringLiteral("sound_cues") && m_cueRequest && m_ready && m_completed && m_cueReview.isEmpty() && message.size() == 3) {
             const auto review = message.value(QStringLiteral("review")).toObject();
             QSet<QString> bins;
@@ -361,7 +425,7 @@ void Montaz::WorkerClient::readOutput()
                 changes += originals[i].toObject().value(QStringLiteral("start_frame")) != operations[i].toObject().value(QStringLiteral("start_frame"));
             record(QStringLiteral("timing_review"),
                    {{QStringLiteral("cuts_shifted"), changes}, {QStringLiteral("max_shift_frames"), m_timingSpec.value(QStringLiteral("max_shift_frames"))}});
-        } else if (type == QStringLiteral("proposal") && !m_musicRequest && !m_timingRequest && !m_cueRequest && m_ready && m_completed &&
+        } else if (type == QStringLiteral("proposal") && !m_musicRequest && !m_timingRequest && !m_cueRequest && !m_captionRequest && m_ready && m_completed &&
                    m_proposal.isEmpty() && message.size() == (message.contains(QStringLiteral("review")) ? 4 : 3) &&
                    message.value(QStringLiteral("proposal")).isObject()) {
             const auto proposal = message.value(QStringLiteral("proposal")).toObject();
@@ -409,9 +473,11 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
     const auto proposal = m_proposal;
     const auto soundtrack = m_soundtrack;
     const auto cueReview = m_cueReview;
+    const auto captionReview = m_captionReview;
     if (!cancelled && failure.isEmpty() &&
         (exitCode != 0 || exitStatus != QProcess::NormalExit ||
-         (m_cueRequest     ? cueReview.isEmpty()
+         (m_captionRequest ? captionReview.isEmpty()
+          : m_cueRequest   ? cueReview.isEmpty()
           : m_musicRequest ? soundtrack.isEmpty()
                            : proposal.isEmpty()) ||
          !m_buffer.isEmpty()))
@@ -423,6 +489,7 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
     m_buffer.clear();
     record(cancelled            ? QStringLiteral("cancelled")
            : !failure.isEmpty() ? QStringLiteral("failed")
+           : m_captionRequest   ? QStringLiteral("captions_ready")
            : m_cueRequest       ? QStringLiteral("cues_ready")
            : m_timingRequest    ? QStringLiteral("timing_ready")
            : m_effectRequest    ? QStringLiteral("effect_ready")
@@ -434,6 +501,8 @@ void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
         Q_EMIT stopped();
     else if (!failure.isEmpty())
         Q_EMIT failed(failure);
+    else if (m_captionRequest)
+        Q_EMIT captionsReady(captionReview);
     else if (m_cueRequest)
         Q_EMIT soundCuesReady(cueReview);
     else if (m_musicRequest)
