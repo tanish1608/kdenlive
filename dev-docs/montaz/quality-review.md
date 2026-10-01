@@ -88,11 +88,16 @@ analysis proposed one internal cut shift: frame **75 → 79** (four frames, abou
 match an accent, lack a nearby accent or cannot extend into available source.
 The candidate is an energy accent, not a verified beat or phrase boundary.
 
-Native Apply completed and one Undo restored the original cut ranges. The project
-was saved in that restored state. Desktop access then became blocked by the Mac
-lock screen. **Real Goa Redo, save/reopen of the refined state, cut seeking and
-export review remain pending.** Do not describe this as a verified improvement
-to the exported film. No new provider call was made during timing analysis.
+Native Apply, one Undo and Redo restored the corresponding cut ranges. The refined
+project was saved. Native H.264/AAC export `~/Movies/goa-timing-review.mp4` contains
+474 frames at 30000/1001 FPS and retains all 742 decoded audio-frame checksums from
+the music review. All decoded video frames from frame 188 onward are unchanged;
+encoder lookahead also changes frames 65–74 before the moved boundary. Exported
+frames 78/79 show bridge/coast, with no blank frame, and native seeking at frame 79
+agrees with the export. No new provider call was made during timing analysis.
+Reopening the refined project retained the ranges and music. Repeating Align cuts
+finished as No change with no running tasks or enabled Apply. This verifies bounded
+timing and export consistency, not improved musical taste.
 
 83 Python checks, 26 Qt transport checks and 7 chat checks (including fixtures),
 plus native `assistanttest`, pass. The native synthetic test verifies actual

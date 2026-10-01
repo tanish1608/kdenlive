@@ -158,6 +158,6 @@ No useful shift terminates as No change. Native Apply rechecks eligibility and t
 file checksum; it never overwrites the live project file. Musical beat/phrase
 verification and sound effects remain pending.
 
-The live Goa review proposed only frame 75 → 79 and exercised Apply and one Undo.
-Redo, refined-state save/reopen, cut seeking and native export remain pending
-because the Mac locked during review. See [quality review](quality-review.md).
+The live Goa review proposed only frame 75 → 79 and exercised Apply, one Undo,
+Redo, save/reopen, native cut seeking, terminal no-change and export. The export retains 474 video frames
+and identical decoded audio. See [quality review](quality-review.md).

@@ -106,7 +106,8 @@ checks bound them to visible source frames. Sub-second sources are skipped and
 low-quality windows excluded. Plans use distinct usable ranges, opening/detail/
 activity/ending guidance, and per-shot reasons. Sampled analysis cannot guarantee
 frame-perfect motion or good storytelling. Instrumental music can follow an
-applied visual edit; it measures energy accents without retiming cuts. Speech,
+applied visual edit; a separate reviewed local refinement can move cuts to energy
+accents within native source limits. Speech,
 beat/phrase alignment, sound effects, framing, transitions and subtitle style
 operations remain pending. Portrait framing is deferred by the user.
 
