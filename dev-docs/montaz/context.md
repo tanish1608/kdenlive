@@ -237,3 +237,27 @@ inspection reproduced the macOS accessibility crash; the crash stack starts in
 desktop review/Apply/export remains unverified. No revised travel film is claimed.
 Finished-sequence replacement, narration/ducking and perceptual comparison remain
 pending; portrait framing and packaging/publication stay deferred.
+
+## Run diagnosis — October 1, 2026
+
+Gemini failures now preserve distinct safe codes for output limits, blocked or
+empty answers and rejected requests. Partial JSON is never accepted, requests
+are not retried automatically, and failed quality review remains explicitly
+unavailable. HTTP 400 is no longer indiscriminately described as an authentication
+failure. Native transport and run records preserve these codes without response
+text, credentials or prompts. 130 Python, 35 Qt transport and 7 chat checks pass;
+the native editor rebuild and `assistanttest` pass.
+
+The full Goa bin cache discrepancy is explained by source conversion: seven
+resources changed from originals to new encoded files (some also changed length).
+All seven originals still match their old content-addressed entries; the converted
+files correctly require new evidence. A fresh two-source-concurrent analysis
+completed in 20.65 seconds: five hits, seven new successful entries, three
+sub-second sources skipped. This does not establish the cause of the earlier
+generic model failure, which cannot be reconstructed from the old logs.
+
+A standalone Qt tree/list app reproduces the selected-children macOS crash at
+the same Cocoa plugin offset as Kdenlive. Upstream QTBUG-149612/change 765434
+addresses synthesized table elements incorrectly deleting the parent interface.
+A scoped development plugin build is being evaluated; no UI workaround or global
+Craft dependency replacement has been committed.

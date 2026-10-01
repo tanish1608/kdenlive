@@ -960,6 +960,32 @@ time.sleep(10)
             QVERIFY(!bytes.contains("private brief"));
         }
     }
+    void providerDiagnosesSurviveTransportAndAreLoggedWithoutResponseText()
+    {
+        for (const auto &code : {QByteArray("provider_request_rejected"), QByteArray("provider_output_limit"), QByteArray("provider_blocked"),
+                                 QByteArray("provider_empty_response")}) {
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), "import json,sys\nr=json.loads(sys.stdin.readline())\n"
+                                    "print(json.dumps({'version':1,'type':'ready'}),flush=True)\n"
+                                    "print(json.dumps({'version':1,'type':'error','code':'" +
+                                        code + "'}),flush=True)\n");
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy failures(&client, &Montaz::WorkerClient::failed), ready(&client, &Montaz::WorkerClient::proposalReady);
+            QVERIFY(client.start(snapshot()));
+            QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 3000);
+            QCOMPARE(failures[0][0].toString(), QString::fromUtf8(code));
+            QCOMPARE(ready.count(), 0);
+            QVERIFY(!client.busy());
+            const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+            bool recorded = false;
+            for (const auto &name : QDir(directory).entryList({QStringLiteral("*.jsonl")}, QDir::Files)) {
+                QFile log(directory + name);
+                QVERIFY(log.open(QIODevice::ReadOnly));
+                recorded |= log.readAll().contains(code);
+            }
+            QVERIFY(recorded);
+        }
+    }
     void malformedMediaProgressCannotFinishAPlan()
     {
         const QByteArray script = R"PY(import json,sys

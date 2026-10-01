@@ -156,6 +156,10 @@ class EditorialTests(unittest.TestCase):
         for code in (
             "provider_timeout",
             "provider_auth",
+            "provider_request_rejected",
+            "provider_output_limit",
+            "provider_blocked",
+            "provider_empty_response",
             "provider_unavailable",
             "invalid_model_response",
         ):

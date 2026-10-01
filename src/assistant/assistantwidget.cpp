@@ -268,6 +268,14 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             reply(i18n("Planning timed out. Completed analysis was retained; try again."));
         else if (code == QStringLiteral("provider_unavailable"))
             reply(i18n("Gemini is unavailable or rate limited. Completed analysis was retained; try again later."));
+        else if (code == QStringLiteral("provider_request_rejected"))
+            reply(i18n("Gemini rejected the request. Check the configured model and supported request settings. Completed analysis was retained."));
+        else if (code == QStringLiteral("provider_output_limit"))
+            reply(i18n("Gemini reached its response limit before finishing. No partial answer was used. Completed analysis was retained; check Run logs."));
+        else if (code == QStringLiteral("provider_blocked"))
+            reply(i18n("Gemini blocked this request or response. No edit was applied. Completed analysis was retained."));
+        else if (code == QStringLiteral("provider_empty_response"))
+            reply(i18n("Gemini returned no usable answer. No edit was applied. Completed analysis was retained; try again later."));
         else if (code == QStringLiteral("invalid_analysis") || code == QStringLiteral("invalid_plan") || code == QStringLiteral("invalid_model_response"))
             reply(i18n("Gemini returned unusable evidence or cuts. No edit was applied. Try a different brief."));
         else if (code == QStringLiteral("insufficient_footage"))

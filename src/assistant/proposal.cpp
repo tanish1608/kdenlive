@@ -115,8 +115,11 @@ QString Montaz::validateEditorialReview(const QJsonObject &snapshot, const QJson
     const auto status = assessment.value(QStringLiteral("status")).toString();
     const auto reason = assessment.value(QStringLiteral("reason"));
     const auto code = assessment.value(QStringLiteral("code")).toString();
-    const QStringList unavailableCodes{QStringLiteral("provider_auth"),          QStringLiteral("provider_timeout"), QStringLiteral("provider_unavailable"),
-                                       QStringLiteral("invalid_model_response"), QStringLiteral("invalid_review"),   QStringLiteral("review_limit")};
+    const QStringList unavailableCodes{QStringLiteral("provider_auth"),           QStringLiteral("provider_timeout"),
+                                       QStringLiteral("provider_unavailable"),    QStringLiteral("provider_request_rejected"),
+                                       QStringLiteral("provider_output_limit"),   QStringLiteral("provider_blocked"),
+                                       QStringLiteral("provider_empty_response"), QStringLiteral("invalid_model_response"),
+                                       QStringLiteral("invalid_review"),          QStringLiteral("review_limit")};
     if (!fields(assessment, {QStringLiteral("status"), QStringLiteral("reason"), QStringLiteral("code")}) || !reason.isString() ||
         (status == QStringLiteral("unavailable") ? (!reason.toString().isEmpty() || !unavailableCodes.contains(code))
                                                  : ((status != QStringLiteral("kept") && status != QStringLiteral("revised")) ||

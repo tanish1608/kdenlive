@@ -11,6 +11,10 @@ from .protocol import fields
 
 REVIEW_CODES = {
     "provider_auth",
+    "provider_request_rejected",
+    "provider_output_limit",
+    "provider_blocked",
+    "provider_empty_response",
     "provider_timeout",
     "provider_unavailable",
     "invalid_model_response",

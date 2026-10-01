@@ -62,7 +62,11 @@ class Gemini:
             with urllib.request.urlopen(request, timeout=35) as response:
                 data = decode(response.read(MAX_MESSAGE_BYTES + 1))
         except urllib.error.HTTPError as exc:
-            code = "provider_auth" if exc.code in (400, 401, 403) else "provider_unavailable"
+            code = (
+                "provider_auth" if exc.code in (401, 403)
+                else "provider_request_rejected" if exc.code == 400
+                else "provider_unavailable"
+            )
             raise AssistantError(code) from None
         except (TimeoutError, socket.timeout) as exc:
             raise AssistantError("provider_timeout") from exc
@@ -70,13 +74,29 @@ class Gemini:
             raise AssistantError("provider_unavailable") from exc
         except ValueError as exc:
             raise AssistantError("invalid_model_response") from exc
+        candidates = data.get("candidates")
+        if not candidates:
+            feedback = data.get("promptFeedback")
+            if type(feedback) is dict and feedback.get("blockReason"):
+                raise AssistantError("provider_blocked")
+            raise AssistantError("provider_empty_response")
         try:
-            candidate = data["candidates"][0]
-            if candidate.get("finishReason") != "STOP":
+            candidate = candidates[0]
+            finish = candidate.get("finishReason")
+            if finish == "MAX_TOKENS":
+                raise AssistantError("provider_output_limit")
+            if finish in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}:
+                raise AssistantError("provider_blocked")
+            if finish != "STOP":
                 raise AssistantError("invalid_model_response")
             text = "".join(
                 p.get("text", "") for p in candidate["content"]["parts"] if not p.get("thought")
             )
+            if not text.strip():
+                raise AssistantError("provider_empty_response")
             return decode(text.encode())
+        except AssistantError:
+            # Preserve safe diagnoses; never accept a truncated or blocked answer.
+            raise
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             raise AssistantError("invalid_model_response") from exc
