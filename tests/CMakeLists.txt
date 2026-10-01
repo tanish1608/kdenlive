@@ -37,6 +37,7 @@ set(KdenliveTest_SOURCES
     timewarptest.cpp
     titlertest.cpp
     treetest.cpp
+    transcodetest.cpp
     trimmingtest.cpp
     utilstest.cpp
 )

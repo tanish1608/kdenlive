@@ -170,7 +170,7 @@ void TranscodeTask::run()
         m_jobProcess->start(KdenliveSettings::meltpath(), mltParameters);
         AbstractTask::setPreferredPriority(m_jobProcess->processId());
         m_jobProcess->waitForFinished(-1);
-        result = m_jobProcess->exitStatus() == QProcess::NormalExit;
+        result = m_jobProcess->exitStatus() == QProcess::NormalExit && m_jobProcess->exitCode() == 0;
         m_jobProcess->deleteLater();
     } else {
         m_isFfmpegJob = true;
@@ -209,7 +209,20 @@ void TranscodeTask::run()
                 parameters << QStringLiteral("-map") << QStringLiteral("0:V");
             }
             if (!m_transcodeParams.contains(QStringLiteral("-an "))) {
-                parameters << QStringLiteral("-map") << QStringLiteral("0:a");
+                if (binClip) {
+                    // Phone recordings may contain auxiliary audio with no known codec.
+                    // Preserve every usable stream in its original order, without asking
+                    // FFmpeg to decode unsupported streams or requiring audio in silent clips.
+                    const auto streams = binClip->audioStreams();
+                    for (auto stream = streams.cbegin(); stream != streams.cend(); ++stream) {
+                        const QString codec = binClip->getProducerProperty(QStringLiteral("meta.media.%1.codec.name").arg(stream.key()));
+                        if (!codec.isEmpty() && codec != QLatin1String("none")) {
+                            parameters << QStringLiteral("-map") << QStringLiteral("0:%1").arg(stream.key());
+                        }
+                    }
+                } else {
+                    parameters << QStringLiteral("-map") << QStringLiteral("0:a?");
+                }
             }
         }
         QStringList params = m_transcodeParams.split(QLatin1Char(' '));
@@ -228,7 +241,7 @@ void TranscodeTask::run()
         m_jobProcess->start(KdenliveSettings::ffmpegpath(), parameters, QIODevice::ReadOnly);
         AbstractTask::setPreferredPriority(m_jobProcess->processId());
         m_jobProcess->waitForFinished(-1);
-        result = m_jobProcess->exitStatus() == QProcess::NormalExit;
+        result = m_jobProcess->exitStatus() == QProcess::NormalExit && m_jobProcess->exitCode() == 0;
         m_jobProcess->deleteLater();
     }
     destUrl.append(transcoderExt);
