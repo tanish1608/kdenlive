@@ -43,6 +43,13 @@ worker progress and native application results; pending review has no running jo
 This development build reads the Python package from this checkout's source
 directory. Relocatable worker installation belongs to later distribution work.
 
+The **AI** toggle sits at the far right of the top toolbar. The assistant occupies
+the full right side, beside both the preview and timeline; closing it returns
+that space to editing. Restoring a workspace or project repositions the assistant
+outside asset tabs and hides the Clip Monitor, keeping the Project Monitor for
+timeline playback. Asset selection leaves that playback active. The Clip Monitor
+remains available explicitly through View when source inspection is needed.
+
 Run records are JSON lines under the application's cache directory,
 `montaz/runs/<request-id>.jsonl`. On macOS this is normally under
 `~/Library/Caches/kdenlive/`. Records contain timing/status/revision/apply metadata;

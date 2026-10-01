@@ -174,6 +174,13 @@ void MonitorManager::refreshMonitors()
 
 bool MonitorManager::activateMonitor(Kdenlive::MonitorId name, bool raiseMonitor, bool quickSwitch)
 {
+#ifdef MONTAZ_ASSISTANT_ENABLED
+    // Keep timeline playback active when an asset is selected with its preview hidden.
+    // Internal refreshes may still briefly switch to the hidden monitor.
+    if (name == Kdenlive::ClipMonitor && !quickSwitch && m_clipMonitor && !m_clipMonitor->isVisible()) {
+        return false;
+    }
+#endif
     if ((m_activeMonitor != nullptr) && m_activeMonitor->id() == name) {
         return true;
     }

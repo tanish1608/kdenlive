@@ -28,6 +28,9 @@ class LayoutManagement : public QObject
 public:
     explicit LayoutManagement(QObject *parent);
 
+Q_SIGNALS:
+    void layoutRestored();
+
 public Q_SLOTS:
     /** @brief Loads a layout by LayoutInfo. */
     bool slotLoadLayout(LayoutInfo layout, bool onlyIfNoPrevious = false);

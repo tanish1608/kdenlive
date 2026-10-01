@@ -19,6 +19,19 @@ edit proposals; messages never directly execute code or modify project files.
 - [x] Present filenames and durations; apply only the current reviewed proposal.
 - [x] Compile, exercise the interface, test cancellation and project isolation.
 
+## Workspace refinement
+
+- [x] Align the AI toggle at the far right of the top toolbar.
+- [x] Keep the assistant in a full-height right dock after layout restoration.
+- [x] Hide the source Clip Monitor; retain native timeline playback and preview.
+- [x] Verify opening/closing, asset selection and reopening the saved Goa project.
+
+The native build and `assistanttest` pass. The desktop checks restored the old
+tabbed assistant to the right, reclaimed editing space on close, kept source
+selection from reopening the Clip Monitor, and moved Library alongside the bin.
+Preset workspace switching still needs a manual check when presets are available
+in this development environment; the Load Layout submenu was empty here.
+
 Conversations are bounded and session-only. Secrets, prompts and source filenames
 stay out of run logs. A pending review is visibly distinct from background work;
 Stop, failure and invalidation leave no task marked as working.

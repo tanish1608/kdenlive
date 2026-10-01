@@ -266,6 +266,11 @@ private:
     KDDockWidgets::QtWidgets::DockWidget *m_projectMonitorDock{nullptr};
     Monitor *m_projectMonitor{nullptr};
 
+    KDDockWidgets::QtWidgets::DockWidget *m_assistantDock{nullptr};
+    QAction *m_assistantToolbarSpacer{nullptr};
+    void setupAssistantToolbar();
+    void restoreAssistantLayout();
+
     AudioGraphSpectrum *m_audioSpectrum{nullptr};
 
     KDDockWidgets::QtWidgets::DockWidget *m_undoViewDock{nullptr};

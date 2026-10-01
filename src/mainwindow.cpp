@@ -226,6 +226,9 @@ void MainWindow::init()
     ctnLay->addWidget(fr);
     setupActions();
     auto *layoutManager = new LayoutManagement(this);
+#ifdef MONTAZ_ASSISTANT_ENABLED
+    connect(layoutManager, &LayoutManagement::layoutRestored, this, &MainWindow::restoreAssistantLayout);
+#endif
     connect(pCore.get(), &Core::loadLayoutById, layoutManager, &LayoutManagement::slotLoadLayoutById, Qt::DirectConnection);
     connect(pCore.get(), &Core::loadLayoutFromData, layoutManager, &LayoutManagement::slotLoadLayoutFromData, Qt::DirectConnection);
     connect(pCore.get(), &Core::adjustLayoutToDar, layoutManager, &LayoutManagement::adjustLayoutToDar, Qt::DirectConnection);
@@ -499,14 +502,22 @@ void MainWindow::init()
     m_undoViewDock = addDock(i18n("Undo History"), QStringLiteral("undo_history"), m_undoView, KDDockWidgets::Location_None, m_projectBinDock);
 
 #ifdef MONTAZ_ASSISTANT_ENABLED
-    auto assistantDock = addDock(i18n("AI Assistant"), QStringLiteral("montaz_assistant"), new Montaz::AssistantWidget(), KDDockWidgets::Location_OnRight,
-                                 nullptr, QSize(380, 600));
-    assistantDock->close();
-    auto assistantAction = actionCollection()->action(QStringLiteral("raise_montaz_assistant"));
+    m_assistantDock = addDock(i18n("AI Assistant"), QStringLiteral("montaz_assistant"), new Montaz::AssistantWidget(), KDDockWidgets::Location_OnRight, nullptr,
+                              QSize(380, 600));
+    m_assistantDock->close();
+    auto assistantAction = m_assistantDock->toggleAction();
     assistantAction->setText(i18n("AI Assistant"));
     assistantAction->setIconText(i18n("AI"));
     assistantAction->setIcon(QIcon::fromTheme(QStringLiteral("tools-wizard")));
-    assistantAction->setToolTip(i18n("Open the AI editing assistant"));
+    assistantAction->setToolTip(i18n("Show or hide the AI editing assistant"));
+    connect(assistantAction, &QAction::triggered, this, [this](bool open) {
+        if (open) {
+            // Move out of any restored tab group and occupy the full editor height.
+            mainDockWindow->addDockWidget(m_assistantDock, KDDockWidgets::Location_OnRight, nullptr, QSize(380, 600));
+            m_assistantDock->setAsCurrentTab();
+            m_assistantDock->setFocus(Qt::OtherFocusReason);
+        }
+    });
 #endif
 
     connect(m_commandStack, &QUndoGroup::cleanChanged, [this, cleanHistory](bool isClean) {
@@ -644,7 +655,7 @@ void MainWindow::init()
     // Since not all widgets are added yet, don't use the Save flag now
     setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::StatusBar | KXmlGuiWindow::Create);
 #ifdef MONTAZ_ASSISTANT_ENABLED
-    if (!toolBar()->actions().contains(assistantAction)) toolBar()->addAction(assistantAction);
+    setupAssistantToolbar();
 #endif
 
     // Remove secondary cut shortcut conflicting with extract action
@@ -947,6 +958,9 @@ void MainWindow::init()
 void MainWindow::finishUiSetup()
 {
     pCore->restoreLayout();
+#ifdef MONTAZ_ASSISTANT_ENABLED
+    restoreAssistantLayout();
+#endif
     Q_EMIT pCore->closeSplash();
     setAutoSaveSettings();
     QObject::disconnect(pCore.get(), &Core::GUISetupDone, this, nullptr);
@@ -1166,6 +1180,9 @@ void MainWindow::saveNewToolbarConfig()
     loadDockActions();
     loadClipActions();
     loadContainerActions();
+#ifdef MONTAZ_ASSISTANT_ENABLED
+    setupAssistantToolbar();
+#endif
     for (auto &bin : m_binWidgets) {
         bin->setupGeneratorMenu();
     }
@@ -1176,6 +1193,63 @@ void MainWindow::saveNewToolbarConfig()
     toolBar()->insertAction(separator, m_hamburgerMenu);
     m_hamburgerMenu->hideActionsOf(toolBar());
 }
+
+#ifdef MONTAZ_ASSISTANT_ENABLED
+void MainWindow::setupAssistantToolbar()
+{
+    auto assistantAction = m_assistantDock->toggleAction();
+    // Older sessions added the raise action among the file controls.
+    toolBar()->removeAction(actionCollection()->action(QStringLiteral("raise_montaz_assistant")));
+    toolBar()->removeAction(assistantAction);
+    if (!m_assistantToolbarSpacer) {
+        auto spacer = new QWidget(this);
+        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        auto spacerAction = new QWidgetAction(this);
+        spacerAction->setDefaultWidget(spacer);
+        m_assistantToolbarSpacer = spacerAction;
+    }
+    auto assistantToolbar = toolBar(QStringLiteral("montazAssistantToolBar"));
+    assistantToolbar->setWindowTitle(i18n("AI Assistant"));
+    assistantToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    assistantToolbar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    assistantToolbar->setMovable(false);
+    if (!assistantToolbar->actions().contains(m_assistantToolbarSpacer)) {
+        assistantToolbar->insertAction(assistantAction, m_assistantToolbarSpacer);
+    }
+    if (!assistantToolbar->actions().contains(assistantAction)) {
+        assistantToolbar->addAction(assistantAction);
+    }
+    addToolBar(Qt::TopToolBarArea, assistantToolbar);
+    removeToolBarBreak(assistantToolbar);
+}
+
+void MainWindow::restoreAssistantLayout()
+{
+    if (!m_assistantDock) {
+        return;
+    }
+    const bool assistantOpen = m_assistantDock->isOpen();
+    mainDockWindow->addDockWidget(m_assistantDock, KDDockWidgets::Location_OnRight, nullptr, QSize(380, 600));
+    if (!assistantOpen) {
+        m_assistantDock->close();
+    }
+    m_clipMonitorDock->close();
+    // A saved source-monitor tab group may also contain Library. Keep asset tools
+    // with the bin rather than leave an empty source-preview column behind.
+    if (auto library = KDDockWidgets::DockRegistry::self()->dockByName(QStringLiteral("library"))) {
+        const bool libraryOpen = library->isOpen();
+        m_projectBinDock->asDockWidgetController()->addDockWidgetAsTab(library);
+        if (!libraryOpen) {
+            library->close();
+        }
+    }
+    m_projectBinDock->open();
+    m_projectBinDock->setAsCurrentTab();
+    m_projectMonitorDock->open();
+    m_projectMonitorDock->setAsCurrentTab();
+    pCore->monitorManager()->activateMonitor(Kdenlive::ProjectMonitor, false);
+}
+#endif
 
 void MainWindow::slotReloadEffects(const QStringList &paths)
 {
@@ -4755,6 +4829,13 @@ void MainWindow::slotUpdateMonitorOverlays(int id, int code)
 void MainWindow::raiseMonitor(bool clipMonitor, bool raise)
 {
     if (clipMonitor) {
+#ifdef MONTAZ_ASSISTANT_ENABLED
+        // Selecting an asset must not reopen the source preview in this workspace.
+        // The native View action still lets users explicitly open it when needed.
+        if (!m_clipMonitorDock->isOpen()) {
+            return;
+        }
+#endif
         if (raise) {
             m_clipMonitorDock->open();
         }

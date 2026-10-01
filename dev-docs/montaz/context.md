@@ -123,3 +123,11 @@ a controlled editorial-quality benchmark. Sub-second travel cuts are rejected.
 Native Apply/Undo/Redo, first-cut seeking, saving, Stop and conversation reset were
 exercised. Mixed-orientation framing, audio, temporal evidence, shot rationale and
 exported output remain open. See work-plan.md for the staged checklist.
+
+The subsequent workspace refinement puts the AI toggle at the far right and
+opens a full-height native right dock. Restored layouts move it out of asset tabs;
+Library stays with the bin, the source Clip Monitor is hidden, and source
+selection keeps the timeline monitor active. Native build/`assistanttest` and
+desktop open/close, source selection and saved-project restoration passed.
+Preset workspace switching remains a separate manual check (the local Load
+Layout submenu was empty). Packaging and releases remain deferred.

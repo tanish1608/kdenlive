@@ -244,6 +244,7 @@ bool LayoutManagement::slotLoadLayout(LayoutInfo layout, bool onlyIfNoPrevious)
     if (!KdenliveSettings::showtitlebars()) {
         Q_EMIT pCore->hideBars(!KdenliveSettings::showtitlebars());
     }
+    Q_EMIT layoutRestored();
     return true;
 }
 
@@ -279,6 +280,7 @@ bool LayoutManagement::slotLoadLayoutFromData(const QString &layoutData, bool on
         Q_EMIT pCore->hideBars(!KdenliveSettings::showtitlebars());
     }
     m_firstLayoutLoaded = true;
+    Q_EMIT layoutRestored();
     return true;
 }
 
