@@ -1,21 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Montaz contributors
+#include "assistant/assistantwidget.h"
+#include "assistant/chatview.h"
 #include "assistant/editbatch.h"
 #include "assistant/editoradapter.h"
 #include "assistant/montage.h"
 #include "assistant/proposal.h"
+#include "assistant/workerclient.h"
 #include "bin/model/subtitlemodel.hpp"
 #include "bin/projectclip.h"
 #include "doc/kdenlivedoc.h"
 #include "effects/effectstack/model/effectstackmodel.hpp"
 #include "test_utils.hpp"
 
+#include <QApplication>
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLabel>
+#include <QMenu>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QTimer>
 #include <cmath>
 #include <mlt++/MltConsumer.h>
 
@@ -39,6 +49,57 @@ void writeMusicWave(const QString &path, int seconds)
     }
 }
 } // namespace
+
+TEST_CASE("Assistant keeps optional tools together and sound requests out of the editing brief", "[Montaz][AssistantUI]")
+{
+    Montaz::AssistantWidget widget;
+    const auto transitions = widget.findChild<QPushButton *>(QStringLiteral("assistantTransitions"));
+    REQUIRE(transitions);
+    REQUIRE(transitions->menu());
+    const auto menu = transitions->menu()->actions();
+    REQUIRE(menu.size() == 6);
+    REQUIRE(menu[0]->text() == QStringLiteral("Beat-synced cuts"));
+    REQUIRE(menu[1]->text() == QStringLiteral("Match cut"));
+    REQUIRE(menu[0]->isEnabled());
+    REQUIRE(menu[1]->isEnabled());
+    for (int i = 3; i < 6; ++i)
+        REQUIRE_FALSE(menu[i]->isEnabled());
+    widget.resize(500, 700);
+    widget.show();
+    QApplication::processEvents();
+    bool menuOpened = false;
+    QTimer::singleShot(0, transitions, [&]() {
+        menuOpened = transitions->menu()->isVisible();
+        transitions->menu()->close();
+    });
+    transitions->click();
+    QApplication::processEvents();
+    REQUIRE(menuOpened);
+    REQUIRE(widget.findChild<QPushButton *>(QStringLiteral("assistantAddMusic")));
+    for (const auto button : widget.findChildren<QPushButton *>())
+        REQUIRE_FALSE(QStringList{"Add sound", "Align cuts", "Match cut"}.contains(button->text()));
+    for (const auto label : widget.findChildren<QLabel *>())
+        REQUIRE_FALSE(label->text().contains(QStringLiteral("Story → Music")));
+    const auto chat = widget.findChild<Montaz::ChatView *>();
+    const auto worker = widget.findChild<Montaz::WorkerClient *>();
+    const auto composer = widget.findChild<QPlainTextEdit *>(QStringLiteral("assistantComposer"));
+    REQUIRE(chat);
+    REQUIRE(worker);
+    REQUIRE(composer);
+    // No document/media: these requests must settle before configuring a
+    // provider, not fall through to a visual edit or leave the composer busy.
+    for (const auto &request : {QStringLiteral("Suggest sounds"), QStringLiteral("Add a 2 second sound of waves"),
+                                QStringLiteral("Add a 11 second sound of waves"), QStringLiteral("Apply a whip pan")}) {
+        composer->setPlainText(request);
+        chat->submit();
+        REQUIRE_FALSE(worker->busy());
+        REQUIRE(composer->isEnabled());
+        REQUIRE(chat->draft().isEmpty());
+    }
+    const auto history = widget.findChild<QTextBrowser *>()->toPlainText();
+    REQUIRE_FALSE(history.contains(QStringLiteral("Analyzing footage")));
+    REQUIRE(history.contains(QStringLiteral("not available yet")));
+}
 
 TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]")
 {

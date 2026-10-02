@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #include "assistantwidget.h"
+#include "chatcommands.h"
 #include "chatview.h"
 #include "editoradapter.h"
 #include "proposal.h"
@@ -11,6 +12,7 @@
 #include "core.h"
 
 #include <KLocalizedString>
+#include <QAction>
 #include <QAudioOutput>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -19,7 +21,6 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
 #include <QListWidget>
@@ -68,20 +69,27 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     options->addWidget(m_duration);
     layout->addLayout(options);
     m_music = new QPushButton(QIcon::fromTheme(QStringLiteral("audio-x-generic")), i18n("Add music"), this);
+    m_music->setObjectName(QStringLiteral("assistantAddMusic"));
     m_music->setToolTip(i18n("Compose an ElevenLabs instrumental for the current timeline. Save the project first."));
-    auto soundActions = new QHBoxLayout;
-    soundActions->addWidget(m_music);
-    m_effect = new QPushButton(i18n("Add sound"), this);
-    m_effect->setToolTip(i18n("Describe a sound at the playhead or suggest sparse sounds from cached footage."));
-    soundActions->addWidget(m_effect);
-    auto sounds = new QMenu(m_effect);
-    sounds->addAction(i18n("Describe a sound"), this, &AssistantWidget::composeEffect);
-    sounds->addAction(i18n("Suggest sounds"), this, &AssistantWidget::suggestSounds);
-    m_effect->setMenu(sounds);
-    m_align = new QPushButton(i18n("Align cuts"), this);
-    m_align->setToolTip(i18n("Review cut timing after adding music and before Match cut or captions. Estimated beats use energy accents as a fallback."));
-    soundActions->addWidget(m_align);
-    layout->addLayout(soundActions);
+    auto actions = new QHBoxLayout;
+    actions->addWidget(m_music);
+    m_transitions = new QPushButton(i18n("Transitions"), this);
+    m_transitions->setObjectName(QStringLiteral("assistantTransitions"));
+    m_transitions->setToolTip(i18n("Choose a transition to review. Transitions are only used when you request them."));
+    auto transitions = new QMenu(m_transitions);
+    transitions->setToolTipsVisible(true);
+    transitions->addAction(i18n("Beat-synced cuts"), this, &AssistantWidget::refineTiming);
+    transitions->addAction(i18n("Match cut"), this, &AssistantWidget::matchCut);
+    transitions->addSeparator();
+    for (const auto &label : {i18n("Whip pan — coming soon"), i18n("Object wipe — coming soon"), i18n("Speed ramp — coming soon")}) {
+        auto action = transitions->addAction(label);
+        action->setEnabled(false);
+        action->setToolTip(i18n("This transition is not available yet."));
+    }
+    m_transitions->setMenu(transitions);
+    // Accessible button activation emits clicked() rather than a mouse press.
+    connect(m_transitions, &QPushButton::clicked, m_transitions, &QPushButton::showMenu);
+    actions->addWidget(m_transitions);
     m_captions = new QPushButton(i18n("Captions"), this);
     m_captions->setToolTip(i18n("Recognize placed original audio or change the appearance of existing captions."));
     auto captionsMenu = new QMenu(m_captions);
@@ -91,17 +99,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     captionsMenu->addAction(i18n("Bold caption style"), this, [this]() { changeCaptionStyle(QStringLiteral("bold")); });
     captionsMenu->addAction(i18n("Original caption styles"), this, [this]() { changeCaptionStyle(QStringLiteral("original")); });
     m_captions->setMenu(captionsMenu);
-    auto visualActions = new QHBoxLayout;
-    visualActions->addWidget(m_captions);
-    m_match = new QPushButton(i18n("Match cut"), this);
-    m_match->setToolTip(i18n("Select two adjacent video-only shots to review an object-aligned match cut."));
-    visualActions->addWidget(m_match);
-    layout->addLayout(visualActions);
-    auto workflow = new QLabel(i18n("Story → Music → Align cuts → Match cut → Captions"), this);
-    workflow->setWordWrap(true);
-    layout->addWidget(workflow);
-    connect(m_match, &QPushButton::clicked, this, &AssistantWidget::matchCut);
-    connect(m_align, &QPushButton::clicked, this, &AssistantWidget::refineTiming);
+    actions->addWidget(m_captions);
+    layout->addLayout(actions);
     connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
     m_tasks = new QTreeWidget(this);
     m_tasks->setObjectName(QStringLiteral("assistantTasks"));
@@ -189,9 +188,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     connect(m_worker, &WorkerClient::busyChanged, this, [this](bool busy) {
         m_plan->setEnabled(!busy);
         m_music->setEnabled(!busy);
-        m_effect->setEnabled(!busy);
-        m_align->setEnabled(!busy);
-        m_match->setEnabled(!busy);
+        m_transitions->setEnabled(!busy);
         m_captions->setEnabled(!busy);
         m_stop->setEnabled(busy);
         m_newBrief->setEnabled(!busy);
@@ -201,7 +198,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_duration->setEnabled(!busy);
     });
     connect(m_plan, &QPushButton::clicked, m_chat, &ChatView::submit);
-    connect(m_chat, &ChatView::submitted, this, &AssistantWidget::planEdit);
+    connect(m_chat, &ChatView::submitted, this, &AssistantWidget::submitMessage);
     connect(m_chat, &ChatView::inputTooLong, this, [this]() { reply(i18n("Keep each message under 2,000 characters.")); });
     connect(m_newBrief, &QPushButton::clicked, this, [this]() {
         clearProposal();
@@ -588,7 +585,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (m_adapter->snapshot() != m_snapshot || !validateTimingProposal(m_snapshot, m_timingSpec, proposal).isEmpty()) {
             clearProposal();
             finishTasks(i18n("Outdated"));
-            reply(i18n("The sequence changed. Choose Align cuts for a fresh timing review."));
+            reply(i18n("The sequence changed. Choose Beat-synced cuts from Transitions for a fresh review."));
             return;
         }
         m_timingProposal = proposal;
@@ -746,8 +743,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         m_activeTask = -1;
         reply(result.isEmpty()
                   ? (replacing ? i18n("Draft replaced. One Undo restores the previous shots. Music, captions and neighboring edits keep their timing.")
-                               : i18n("Edit added. Send a refinement to revise this draft; New brief creates a separate edit. Add music, then Align cuts "
-                                      "before Match cut or captions."))
+                               : i18n("Edit added. Send a refinement to revise this draft; New brief creates a separate edit."))
               : result == QStringLiteral("rollback_failed") ? i18n("The edit could not be fully reverted. Reopen the project before trying again.")
                                                             : i18n("Edit could not be applied. Send a message to request a new plan."));
     });
@@ -786,6 +782,44 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     resetConversation();
 }
 
+void Montaz::AssistantWidget::submitMessage(const QString &message)
+{
+    if (m_worker->busy()) return;
+    m_chat->addMessage(i18n("You"), message);
+    m_chat->setBusy(false);
+    const auto command = chatCommand(message);
+    switch (command.action) {
+    case ChatAction::Music:
+        composeMusic();
+        return;
+    case ChatAction::SoundSuggestions:
+        suggestSounds();
+        return;
+    case ChatAction::SoundEffect: {
+        const auto rate = m_adapter->snapshot().value(QStringLiteral("frame_rate")).toObject();
+        const double fps = double(rate.value(QStringLiteral("numerator")).toInt()) / rate.value(QStringLiteral("denominator")).toInt(1);
+        const int length = qBound(int(std::ceil(fps / 2)), qRound(command.seconds * fps), int(std::floor(10 * fps)));
+        beginEffect(m_adapter->effectRequest(command.description, length));
+        return;
+    }
+    case ChatAction::BeatCuts:
+        refineTiming();
+        return;
+    case ChatAction::MatchCut:
+        matchCut();
+        return;
+    case ChatAction::UnavailableTransition:
+        reply(i18n("That transition is not available yet. Beat-synced cuts and Match cut are available from Transitions."));
+        return;
+    case ChatAction::InvalidSound:
+        reply(i18n("Describe one sound in up to 1,000 characters, with a duration from 0.5 to 10 seconds."));
+        return;
+    case ChatAction::Edit:
+        planEdit(message);
+        return;
+    }
+}
+
 void Montaz::AssistantWidget::planEdit(const QString &message)
 {
     clearProposal();
@@ -800,7 +834,6 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
         m_tasks->topLevelItem(row)->setText(0, taskNames[row]);
     finishTasks(i18n("Superseded"));
     m_tasks->hide();
-    m_chat->addMessage(i18n("You"), message);
     const auto brief = m_brief.isEmpty() ? message : m_brief + QStringLiteral("\nRefinement: ") + message;
     if (brief.size() > 2000) {
         m_chat->setBusy(false);
@@ -846,8 +879,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
     setTask(0, i18n("Working"));
     reply(
         m_draftSpec.isEmpty()
-            ? i18n("I’ll arrange a visual story and show the proposed shots. Apply adds one undoable edit. Add music, then Align cuts before Match cut or "
-                   "captions.")
+            ? i18n("I’ll arrange a visual story and show the proposed shots. Apply adds one undoable edit.")
             : i18n("I’ll revise this draft within its exact current duration. Review the new shots, then Replace draft. One Undo restores the previous edit."));
     m_status->setText(i18n("Analyzing footage…"));
 }
@@ -865,8 +897,8 @@ void Montaz::AssistantWidget::resetConversation()
     m_tasks->hide();
     m_chat->reset();
     m_chat->setBusy(m_worker->busy());
-    m_chat->addMessage(i18n("Assistant"), i18n("What would you like to make? Describe a travel highlight, choose a style and duration, then send. You can "
-                                               "refine the brief here before applying."));
+    m_chat->addMessage(i18n("Assistant"), i18n("Describe an edit or refine your brief. Music, captions and transitions are optional. "
+                                               "For sound effects, ask here: “suggest sounds” or “add a 2 second sound of gentle waves”."));
     m_status->setText(i18n("Enter to send · Shift+Enter for a new line"));
 }
 
@@ -975,29 +1007,6 @@ void Montaz::AssistantWidget::refineTiming()
     m_tasks->show();
     reply(i18n("I’ll measure your existing music and propose small cut shifts. Shot order, source starts, music and total length stay unchanged. No new "
                "generation is needed."));
-}
-
-void Montaz::AssistantWidget::composeEffect()
-{
-    bool accepted = false;
-    const QString description =
-        QInputDialog::getMultiLineText(this, i18n("Add sound effect"),
-                                       i18n("Describe one short sound at the playhead, for example gentle coastal waves. No music or speech."), QString(),
-                                       &accepted)
-            .trimmed();
-    if (!accepted || description.isEmpty()) return;
-    if (description.size() > 1000) {
-        reply(i18n("Keep the sound description within 1,000 characters."));
-        return;
-    }
-    const double seconds = QInputDialog::getDouble(this, i18n("Sound duration"), i18n("Seconds (the sound must fit within the shot at the playhead):"), 2.0,
-                                                   0.5, 10.0, 2, &accepted);
-    if (!accepted) return;
-    const auto current = m_adapter->snapshot();
-    const auto rate = current.value(QStringLiteral("frame_rate")).toObject();
-    const double fps = double(rate.value(QStringLiteral("numerator")).toInt()) / rate.value(QStringLiteral("denominator")).toInt(1);
-    const int length = qBound(int(std::ceil(fps / 2)), qRound(seconds * fps), int(std::floor(10 * fps)));
-    beginEffect(m_adapter->effectRequest(description, length));
 }
 
 void Montaz::AssistantWidget::beginEffect(const QJsonObject &spec)

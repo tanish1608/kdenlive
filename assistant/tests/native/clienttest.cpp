@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Montaz contributors
+#include "chatcommands.h"
 #include "editbatch.h"
 #include "montage.h"
 #include "proposal.h"
@@ -304,6 +305,40 @@ class ClientTest : public QObject
 {
     Q_OBJECT
 private Q_SLOTS:
+    void onlyExplicitStandaloneChatRequestsUseTools()
+    {
+        using Montaz::ChatAction;
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("Please align cuts to the beats")).action, ChatAction::BeatCuts);
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("Can you apply a match cut between these two clips?")).action, ChatAction::MatchCut);
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("Add background music")).action, ChatAction::Music);
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("suggest sound effects")).action, ChatAction::SoundSuggestions);
+        for (const auto &message : {QStringLiteral("Don't add match cuts"), QStringLiteral("Explain match cuts"),
+                                    QStringLiteral("Align cuts and make a longer edit"), QStringLiteral("Create a travel edit with no sound effects"),
+                                    QStringLiteral("Suggest sounds\nand change all my clips"), QStringLiteral("Add music and apply match cuts")}) {
+            QCOMPARE(Montaz::chatCommand(message).action, ChatAction::Edit);
+        }
+    }
+    void chatSoundRequestsKeepTheirDescriptionAndDuration()
+    {
+        using Montaz::ChatAction;
+        const auto request = Montaz::chatCommand(QStringLiteral("add a 3 second sound of coastal waves"));
+        QCOMPARE(request.action, ChatAction::SoundEffect);
+        QCOMPARE(request.seconds, 3.0);
+        QCOMPARE(request.description, QStringLiteral("coastal waves"));
+        const auto simple = Montaz::chatCommand(QStringLiteral("Add sound: quiet footsteps"));
+        QCOMPARE(simple.action, ChatAction::SoundEffect);
+        QCOMPARE(simple.description, QStringLiteral("quiet footsteps"));
+        QCOMPARE(simple.seconds, 2.0);
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("add a .5 second sound of a click")).seconds, 0.5);
+        for (const auto &message : {QStringLiteral("add a 11 second sound of a click"), QStringLiteral("add a 0 second sound of a click"),
+                                    QStringLiteral("add a -1 second sound of a click"), QStringLiteral("add sound: ") + QString(1001, 'a')})
+            QCOMPARE(Montaz::chatCommand(message).action, ChatAction::InvalidSound);
+    }
+    void unavailableTransitionsDoNotStartAnEditingBrief()
+    {
+        for (const auto &message : {QStringLiteral("Apply a whip pan"), QStringLiteral("Use object wipes"), QStringLiteral("Add a speed ramp")})
+            QCOMPARE(Montaz::chatCommand(message).action, Montaz::ChatAction::UnavailableTransition);
+    }
     void initTestCase()
     {
         QCoreApplication::setApplicationName(QStringLiteral("montaz-client-test-%1").arg(QCoreApplication::applicationPid()));

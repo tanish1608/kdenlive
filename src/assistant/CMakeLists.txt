@@ -3,6 +3,7 @@
 set(kdenlive_SRCS ${kdenlive_SRCS}
     assistant/assistantwidget.cpp
     assistant/chatview.cpp
+    assistant/chatcommands.cpp
     assistant/editoradapter.cpp
     assistant/editbatch.cpp
     assistant/montage.cpp

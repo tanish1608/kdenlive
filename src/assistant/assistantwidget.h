@@ -27,7 +27,7 @@ public:
 private:
     void clearProposal();
     void composeMusic();
-    void composeEffect();
+    void submitMessage(const QString &message);
     void generateCaptions();
     void changeCaptionStyle(const QString &preset);
     void suggestSounds();
@@ -46,9 +46,7 @@ private:
     QLabel *m_shotReason;
     QListWidget *m_preview;
     QPushButton *m_music;
-    QPushButton *m_effect;
-    QPushButton *m_align;
-    QPushButton *m_match;
+    QPushButton *m_transitions;
     QPushButton *m_matchPreview;
     bool m_matchMode{false};
     QJsonObject m_matchSpec;
