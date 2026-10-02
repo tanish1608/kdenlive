@@ -174,7 +174,7 @@ class EditorialTests(unittest.TestCase):
                 self.assertEqual(self.provider.generate.call_count, 1)
 
     def test_stop_during_provider_call_discards_late_success(self):
-        def late(parts):
+        def late(parts, schema=None):
             self.media.cancel()
             return dict(decision="keep", reason="Late", shots=[])
 

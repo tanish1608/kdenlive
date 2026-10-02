@@ -67,7 +67,9 @@ void Montaz::EditorAdapter::bind()
     invalidate();
     if (!document || !timeline) return;
     m_connections << connect(timeline.get(), &QAbstractItemModel::dataChanged, this, [this](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
-        if (roles.isEmpty() || std::any_of(roles.begin(), roles.end(), [](int role) { return role != TimelineModel::AudioLevelsRole; })) invalidate();
+        if (roles.isEmpty() ||
+            std::any_of(roles.begin(), roles.end(), [](int role) { return role != TimelineModel::AudioLevelsRole && role != TimelineModel::SelectedRole; }))
+            invalidate();
     });
     m_connections << connect(timeline.get(), &QAbstractItemModel::rowsInserted, this, [this]() { invalidate(); });
     m_connections << connect(timeline.get(), &QAbstractItemModel::rowsRemoved, this, [this]() { invalidate(); });
@@ -643,13 +645,25 @@ QString Montaz::EditorAdapter::applyCaptions(const QJsonObject &context, const Q
         timeline->createSubtitleModel();
     const auto model = timeline->getSubtitleModel();
     if (!model || model->rowCount() || model->isLocked() || model->isDisabled()) return QStringLiteral("invalid_captions");
+    const auto captionSize = pCore->getCurrentFrameDisplaySize();
+    const int captionUnit = qMin(captionSize.width(), captionSize.height());
+    const QString captionStyleName = QStringLiteral("Montaz Clean");
+    SubtitleStyle captionAppearance;
+    captionAppearance.setFontName(QStringLiteral("Arial"));
+    captionAppearance.setFontSize(qMax(12, captionUnit / 24));
+    captionAppearance.setBold(true);
+    captionAppearance.setOutline(qMax(1, captionUnit / 360));
+    captionAppearance.setMarginL(qMax(12, captionUnit / 12));
+    captionAppearance.setMarginR(qMax(12, captionUnit / 12));
+    captionAppearance.setMarginV(qMax(12, captionSize.height() / 15));
+    model->setSubtitleStyle(captionStyleName, captionAppearance);
     const double fps = pCore->getCurrentFps();
     const auto result = applyInsertBatch(
         review.value(QStringLiteral("captions")).toArray(),
-        [model, fps](const QJsonObject &c, UndoFunction &undo, UndoFunction &redo) {
+        [model, fps, captionStyleName](const QJsonObject &c, UndoFunction &undo, UndoFunction &redo) {
             const std::pair<int, GenTime> start{0, GenTime(c.value(QStringLiteral("start_frame")).toInt(), fps)};
             const SubtitleEvent event(true, GenTime(c.value(QStringLiteral("start_frame")).toInt() + c.value(QStringLiteral("duration_frames")).toInt(), fps),
-                                      model->getLayerDefaultStyle(0), QString(), 0, 0, 0, QString(), c.value(QStringLiteral("text")).toString());
+                                      captionStyleName, QString(), 0, 0, 0, QString(), c.value(QStringLiteral("text")).toString());
             return model->addSubtitle(start, event, undo, redo, true);
         },
         [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Add assistant captions")); });
@@ -675,12 +689,17 @@ QString Montaz::EditorAdapter::captionStyle(const QString &preset)
         const auto it = info.find(QStringLiteral("PlayResY"));
         const int height = it == info.end() ? pCore->getCurrentFrameDisplaySize().height() : it->second.toInt();
         if (height <= 0) return QStringLiteral("subtitles_unavailable");
+        const auto widthIt = info.find(QStringLiteral("PlayResX"));
+        const int width = widthIt == info.end() ? pCore->getCurrentFrameDisplaySize().width() : widthIt->second.toInt();
+        const int unit = qMin(width, height);
+        if (unit <= 0) return QStringLiteral("subtitles_unavailable");
         style = QStringLiteral("FontName=Arial,FontSize=%1,Bold=%2,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=%3,Shadow="
-                               "0,Alignment=2,MarginV=%4")
-                    .arg(qMax(12, height / (preset == QStringLiteral("bold") ? 16 : 20)))
-                    .arg(preset == QStringLiteral("bold") ? -1 : 0)
-                    .arg(qMax(1, height / 360))
-                    .arg(qMax(12, height / 18));
+                               "0,Alignment=2,MarginV=%4,MarginL=%5,MarginR=%5")
+                    .arg(qMax(12, unit / (preset == QStringLiteral("bold") ? 20 : 24)))
+                    .arg(-1)
+                    .arg(qMax(1, unit / 360))
+                    .arg(qMax(12, height / 15))
+                    .arg(qMax(12, unit / 12));
     }
     if (model->getForceStyle() != style) model->setForceStyle(style);
     return {};

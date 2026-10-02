@@ -6,7 +6,7 @@ import json
 
 from .contracts import ProposalError, Snapshot
 from .gemini import AssistantError, Gemini
-from .planning import RECIPES, MediaTools, proposal_from_plan
+from .planning import PLAN_SCHEMA, RECIPES, MediaTools, proposal_from_plan
 from .protocol import fields
 
 REVIEW_CODES = {
@@ -23,6 +23,15 @@ REVIEW_CODES = {
 }
 
 UNDERFILL_PERCENT = 85  # Editorial trigger, not a perceptual quality score.
+REVIEW_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "decision": {"type": "STRING", "enum": ["keep", "revise"]},
+        "reason": {"type": "STRING"},
+        "shots": PLAN_SCHEMA["properties"]["shots"],
+    },
+    "required": ["decision", "reason", "shots"],
+}
 
 
 def review_draft(
@@ -100,7 +109,8 @@ def review_draft(
     try:
         media.check()
         result = fields(
-            provider.generate([{"text": prompt}]), {"decision", "reason", "shots"}
+            provider.generate([{"text": prompt}], schema=REVIEW_SCHEMA),
+            {"decision", "reason", "shots"},
         )
         media.check()
         if (

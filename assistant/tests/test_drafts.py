@@ -126,7 +126,7 @@ class DraftTests(unittest.TestCase):
         provider.generate.side_effect = [draft, review]
         if cancel:
 
-            def late(_):
+            def late(_, schema=None):
                 media.cancel()
                 return draft
 

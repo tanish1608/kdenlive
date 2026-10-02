@@ -91,6 +91,15 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
         self.assertNotIn(str(new), cache.read_text())
 
+    def test_visual_request_requires_object_wrapping_and_all_window_fields(self):
+        self.analysis()
+        schema = self.provider.generate.call_args.kwargs["schema"]
+        self.assertEqual(schema["type"], "OBJECT")
+        self.assertEqual(schema["required"], ["windows"])
+        window = schema["properties"]["windows"]["items"]
+        self.assertEqual(set(window["required"]), set(self.observation["windows"][0]))
+        self.assertIn("other", window["properties"]["role"]["enum"])
+
     def test_content_model_and_frame_rate_invalidate_the_cache(self):
         self.analysis()
         self.path.write_bytes(b"changed-content")
@@ -114,7 +123,7 @@ class PlanningTests(unittest.TestCase):
         self.assertFalse((self.root / "cache").exists())
 
     def test_changed_media_is_rejected_before_success_can_be_cached(self):
-        def change(_):
+        def change(_, schema=None):
             self.path.write_bytes(b"replaced-during-analysis")
             return self.observation
 
@@ -358,7 +367,7 @@ class PlanningTests(unittest.TestCase):
         snapshot = replace(self.snapshot, assets=(self.asset, replace(self.asset, bin_id="2")))
         barrier = threading.Barrier(2, timeout=3)
 
-        def generate(parts):
+        def generate(parts, schema=None):
             if any(p.get("text", "").startswith("Analyze") for p in parts):
                 barrier.wait()
                 return self.observation

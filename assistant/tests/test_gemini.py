@@ -79,6 +79,15 @@ class GeminiTests(unittest.TestCase):
                 }
             )
 
+    def test_unwrapped_visual_windows_are_rejected_even_when_json_is_valid(self):
+        with self.assertRaisesRegex(AssistantError, "invalid_model_response"):
+            self.generate(
+                dict(candidates=[dict(
+                    finishReason="STOP",
+                    content=dict(parts=[dict(text='[{"window_id":0,"trim_in":0,"trim_out":52}]')]),
+                )])
+            )
+
     def test_empty_and_blocked_requests_have_distinct_diagnoses(self):
         for payload, code in (
             ({"candidates": []}, "provider_empty_response"),

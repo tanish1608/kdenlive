@@ -30,6 +30,46 @@ from .protocol import decode, fields, frame
 ANALYSIS_VERSION = "video-windows-4"
 MIN_QUALITY = 50
 ROLES = {"establishing", "detail", "action", "closing", "other"}
+ANALYSIS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "windows": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "window_id": {"type": "INTEGER"},
+                    "description": {"type": "STRING"},
+                    "role": {"type": "STRING", "enum": sorted(ROLES)},
+                    "quality": {"type": "INTEGER"},
+                    "trim_in": {"type": "INTEGER"},
+                    "trim_out": {"type": "INTEGER"},
+                },
+                "required": ["window_id", "description", "role", "quality", "trim_in", "trim_out"],
+            },
+        }
+    },
+    "required": ["windows"],
+}
+PLAN_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "shots": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "bin_id": {"type": "STRING"},
+                    "window_id": {"type": "INTEGER"},
+                    "duration_frames": {"type": "INTEGER"},
+                    "reason": {"type": "STRING"},
+                },
+                "required": ["bin_id", "window_id", "duration_frames", "reason"],
+            },
+        }
+    },
+    "required": ["shots"],
+}
 RECIPES = {
     "postcard": (
         2,
@@ -360,7 +400,7 @@ def _cached_visual(
         }
     )
     media.check()
-    raw = provider.generate(parts)
+    raw = provider.generate(parts, schema=ANALYSIS_SCHEMA)
     try:
         result = validate_analysis(raw, windows)
     except (ProposalError, TypeError) as exc:
@@ -699,7 +739,7 @@ def plan_media(
             f" Current draft in timeline order (read-only source context): {json.dumps(current_shots)}. "
             "Interpret refinements against these current shots and the observed footage."
         )
-    raw = provider.generate([{"text": prompt}])
+    raw = provider.generate([{"text": prompt}], schema=PLAN_SCHEMA)
     media.check()
     try:
         proposal = proposal_from_plan(

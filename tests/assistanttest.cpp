@@ -747,6 +747,20 @@ TEST_CASE("Assistant captions and style switches preserve native subtitle identi
                                  {QStringLiteral("skipped_clips"), 0},
                                  {QStringLiteral("source_sha256"), QJsonObject{{binId, hash}}},
                                  {QStringLiteral("captions"), captions}};
+        SECTION("Inspecting clip selection preserves a pending caption review")
+        {
+            REQUIRE(timeline->requestSetSelection({id}));
+            REQUIRE(adapter.snapshot() == context);
+            REQUIRE(adapter.captionRequest() == spec);
+            REQUIRE(timeline->requestSetSelection({}));
+            REQUIRE(adapter.snapshot() == context);
+            REQUIRE(adapter.applyCaptions(context, spec, review).isEmpty());
+            REQUIRE(timeline->getSubtitleModel()->rowCount() == 2);
+            stack->undo();
+            REQUIRE(timeline->getSubtitleModel()->rowCount() == 0);
+            REQUIRE(timeline->requestClipMove(id, audio, 110));
+            REQUIRE_FALSE(adapter.applyCaptions(context, spec, review).isEmpty());
+        }
         SECTION("Apply one undo, replay rejection, repeated styles retain IDs and timing")
         {
             REQUIRE(adapter.applyCaptions(context, spec, review).isEmpty());
@@ -754,6 +768,11 @@ TEST_CASE("Assistant captions and style switches preserve native subtitle identi
             auto model = timeline->getSubtitleModel();
             REQUIRE(model);
             REQUIRE(model->rowCount() == 2);
+            const auto appearance = model->getSubtitleStyle(QStringLiteral("Montaz Clean"));
+            const auto frameSize = pCore->getCurrentFrameDisplaySize();
+            REQUIRE(appearance.fontSize() == qMax(12, qMin(frameSize.width(), frameSize.height()) / 24));
+            REQUIRE(appearance.bold());
+            REQUIRE(appearance.outline() >= 1);
             const auto originals = model->getAllSubtitles();
             const auto firstId = model->getSubtitleIdFromIndex(0);
             REQUIRE_FALSE(adapter.applyCaptions(context, spec, review).isEmpty());

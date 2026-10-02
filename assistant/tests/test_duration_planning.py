@@ -188,7 +188,7 @@ class DurationReviewTests(unittest.TestCase):
         )
 
     def test_stop_during_recovery_discards_late_success(self):
-        def late(_):
+        def late(_, schema=None):
             self.media.cancel()
             return self.revised
 

@@ -99,6 +99,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     captionsMenu->addAction(i18n("Bold caption style"), this, [this]() { changeCaptionStyle(QStringLiteral("bold")); });
     captionsMenu->addAction(i18n("Original caption styles"), this, [this]() { changeCaptionStyle(QStringLiteral("original")); });
     m_captions->setMenu(captionsMenu);
+    connect(m_captions, &QPushButton::clicked, m_captions, &QPushButton::showMenu);
     actions->addWidget(m_captions);
     layout->addLayout(actions);
     connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
