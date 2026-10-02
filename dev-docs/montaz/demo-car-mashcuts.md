@@ -44,6 +44,20 @@ Use the fast reel as a **prepared mash-cut montage**. It is not evidence of AI
 improving alignment and does not expose an automatic 26-shot montage feature.
 Current selected-pair AI alignment still needs a separate before/after example.
 
+## Synchronized side-by-side comparison
+
+`car-mash-before-after-5.2s.mp4` is a labelled 1920×720 presentation export, 156
+frames at 30 fps. Left: the corresponding original photos from `full/`, fitted
+to each panel without mirroring, horizon correction or landmark alignment.
+Right: the verified native `car-mash-6.mp4`, scaled to the same panel dimensions.
+Both sides use the same 26 sources, order and six-frame cut timing. The video is
+silent and plays once. Labels describe **match alignment**, with prepared wheel
+alignment identified in the footer; no AI improvement claim is made.
+
+Every frame on both sides was checked against the expected source segment;
+all 312 panel-frame checks passed. The label layout was visually inspected.
+Private build inputs, provenance and validation are in the `comparison/` folder.
+
 ## Remaining rehearsal issue
 
 One 6-frame export attempt crashed while constructing the render-job row after

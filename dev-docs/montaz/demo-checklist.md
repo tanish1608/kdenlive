@@ -97,9 +97,11 @@ recordings, projects and exports outside Git.
 - [x] Use the existing selected-pair Match cut review; inspect whole-subject
   alignment, zoom softness and frames immediately before/after the cut.
   The tested proposal worsened already aligned inputs and was rejected.
-- [ ] Record plain versus aligned versions with identical timing and sources.
-  The prepared mash-cut reel is ready; a convincing **AI alignment improvement**
-  still needs an unaligned source pair.
+- [x] Record plain versus aligned versions with identical timing and sources:
+  `car-mash-before-after-5.2s.mp4`, original photo framing left and prepared
+  alignment right, all 26 cars at 6 frames each. Both sides verified frame by frame.
+- [ ] A convincing **AI alignment improvement** still needs an unaligned source
+  pair; the photo comparison shows Claude's prepared alignment.
 - [ ] Use 20–40 s only if the result reads clearly; give unused time to beat sync.
   No new automatic multi-shot montage is required.
 
@@ -164,3 +166,8 @@ Add completed item IDs, artifact paths, results and any concrete blockers here.
   preserved the supplied geometry. No new montage feature or AI improvement
   claimed. One Qt accessibility crash during render-job insertion remains open;
   reloading the saved project and retrying the export succeeded.
+- October 2: D06 side-by-side comparison exported to
+  `~/Movies/montaz-demo-mashcuts-20261002/car-mash-before-after-5.2s.mp4`.
+  Exactly 156 frames/5.2 s at 30 fps, labelled 1920×720 layout. Original photos
+  are centre-fit on the left, without flipping or wheel alignment; the native
+  fast reel plays on the right. Each side shows the expected car at every frame.
