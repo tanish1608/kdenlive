@@ -71,6 +71,17 @@ revalidates immediately before application on its GUI thread and rejects stale
 or replayed requests. No AI-supplied code, shell commands, effect expressions, or
 arbitrary file paths are executable operations.
 
+The [quick-montage native foundation](montage-foundation.md) separately reserves
+a protocol-v5 review, without extending worker dispatch or exposing a dock action
+yet. The editor issues 2–6 selected video-only sources, bounded trims, per-source
+zoom limits, an 8–12-frame shot length and an append position beyond the sequence.
+The review can select/reorder these sources only, accounting for every exclusion.
+One uniform Transform keyframe per shot frame must map its measured anchor to a
+common target. Native Apply regenerates selection scope, checks all source hashes
+and inserts transformed copies in one rollback-capable Undo. Original edits remain
+in place; scene reload and frame-by-frame exports are checked independently of
+the future AI discovery/solver. Existing worker protocol support is unchanged.
+
 The separate `refine_timing` request returns protocol-v4 retiming operations for
 existing native clip IDs, with strict rhythm measurements and observed anchors.
 Protocol-v2 accent proposals remain accepted. It measures the placed music locally and proposes

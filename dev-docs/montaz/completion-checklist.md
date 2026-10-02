@@ -59,9 +59,14 @@ Detailed scope, branches and acceptance criteria: [Claude assignment](claude-nex
 - [ ] N02 — Add reviewed compatible-shot suggestions to the dock; bind source
   windows, current selection, revision and identities; budget provider/tracker
   work across the whole request. Depends on C01.
+- [x] N03a — Native quick-montage foundation only: 8–12-frame copies, ordered
+  bounded source trims, one common framing target, one Undo and rollback;
+  synthetic frame geometry/MLT reload/export checks. Commit `21a6b32`.
+  [Evidence](montage-foundation.md). No worker or dock action is exposed yet.
 - [ ] N03 — Add an explicit quick match montage: 8–12-frame shots, one shared
   framing per shot, native reorder/trim/insertion contract and one Undo. Preserve
-  source handles and resolve middle-shot framing jointly. Depends on N02.
+  source handles and resolve middle-shot framing jointly. Native foundation
+  N03a is verified; discovery/solver/review and real footage remain. Depends on N02.
 - [ ] N04 — Manual landmark correction in the review, with typed native scope,
   tracking/coverage gates and stale-result rejection.
 - [ ] N05 — Refine wheel/rim landmarks locally in the native helper; measure

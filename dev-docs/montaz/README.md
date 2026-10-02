@@ -84,6 +84,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   Perspective and landmark accuracy remain limits; see
   [landmark integration](landmark-integration.md) and [stability evidence](match-stability-report.md).
   This is a selected-pair prototype; it does not search the entire bin.
+- The [quick-montage native foundation](montage-foundation.md) adds a validated
+  8–12-frame multi-shot insertion API with shared framing, source bounds, one
+  Undo and synthetic native scene reload/export checks. Discovery, the worker
+  solver, dock review and real-footage acceptance remain pending; there is no
+  montage button yet. This completes checklist subgate N03a only.
 - Still pending: deferred portrait framing, additional native failure checks,
   narration, audio pairing/ducking, musical phrase detection, word alignment,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;

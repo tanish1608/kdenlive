@@ -444,3 +444,27 @@ existing landmark/stability work is preserved. Codex owns native/worker/planner
 integration, quick montage contracts, manual/native landmark refinement,
 speech/audio editing and end-to-end quality checks. This document assigns work;
 no Claude session was started or messaged automatically.
+
+## Native quick-montage foundation — October 2
+
+While the user runs Claude's independent packages, Codex completed N03a in
+`21a6b32`. A native-only v5 contract appends reviewed 8–12-frame copies of 2–6
+selected normal-speed video-only shots, accounting for exclusions, validating
+every frame against one shared target and preserving original source edits.
+Checksum/revision/selection checks guard Apply; insertions and transforms use
+one rollback-capable native Undo. The existing pair-match path shares the same
+Transform writer and its controlled tracking/stability exports still pass.
+
+Craft compiled the editor and test target; CTest passed. Qt checks passed 44 + 7.
+Native insertion checks passed 948 assertions, and the opt-in moving-subject
+render check passed 2,238. Export counts are exactly 24/30/36 frames at
+30000/1001 FPS. The latter tests actual pixel geometry after native playback,
+MLT reload, Undo/Redo and H.264 export, using known synthetic source coordinates.
+Testing caught raw dimension fields missing despite valid native metadata;
+using Kdenlive's `frameSize()` resolved eligibility and preserves its proxy/
+pixel-aspect handling. See [montage-foundation.md](montage-foundation.md).
+
+This is not a live AI montage feature or a real-footage quality verdict.
+Worker dispatch, bounded discovery/joint tracking, dock review/Stop/Apply and
+real-footage comparisons remain N02/N03. Claude's packages remain unreviewed
+until delivery; do not infer completion from the user's report that work started.
