@@ -22,6 +22,24 @@ class GeminiTests(unittest.TestCase):
             finally:
                 self.assertEqual(request.call_count, 1)
 
+    def test_optional_schema_constrains_only_requests_that_ask(self):
+        payload = dict(
+            candidates=[
+                dict(finishReason="STOP", content=dict(parts=[dict(text='{"a":1}')]))
+            ]
+        )
+        for schema in (None, {"type": "OBJECT"}):
+            response = Mock()
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=None)
+            response.read.return_value = json.dumps(payload).encode()
+            with patch("urllib.request.urlopen", return_value=response) as request:
+                result = Gemini("private-key").generate([{"text": "x"}], schema=schema)
+            self.assertEqual(result, {"a": 1})
+            config = json.loads(request.call_args.args[0].data)["generationConfig"]
+            self.assertEqual(config.get("responseSchema"), schema)
+            self.assertEqual(config["responseMimeType"], "application/json")
+
     def test_partial_answers_and_thoughts_are_never_accepted(self):
         for finish, code in (
             ("MAX_TOKENS", "provider_output_limit"),
@@ -34,14 +52,31 @@ class GeminiTests(unittest.TestCase):
         ):
             with self.subTest(finish=finish):
                 with self.assertRaises(AssistantError) as failure:
-                    self.generate({"candidates": [{"finishReason": finish, "content": {
-                        "parts": [{"text": '{"valid":true}'}]
-                    }}], "finishMessage": "private-key"})
+                    self.generate(
+                        {
+                            "candidates": [
+                                {
+                                    "finishReason": finish,
+                                    "content": {"parts": [{"text": '{"valid":true}'}]},
+                                }
+                            ],
+                            "finishMessage": "private-key",
+                        }
+                    )
                 self.assertEqual(str(failure.exception), code)
         with self.assertRaisesRegex(AssistantError, "provider_empty_response"):
-            self.generate({"candidates": [{"finishReason": "STOP", "content": {
-                "parts": [{"thought": True, "text": '{"valid":true}'}]
-            }}]})
+            self.generate(
+                {
+                    "candidates": [
+                        {
+                            "finishReason": "STOP",
+                            "content": {
+                                "parts": [{"thought": True, "text": '{"valid":true}'}]
+                            },
+                        }
+                    ]
+                }
+            )
 
     def test_empty_and_blocked_requests_have_distinct_diagnoses(self):
         for payload, code in (
@@ -49,19 +84,43 @@ class GeminiTests(unittest.TestCase):
             ({"promptFeedback": {"blockReason": "SAFETY"}}, "provider_blocked"),
             ({"candidates": [None]}, "invalid_model_response"),
             ({"candidates": [{"finishReason": []}]}, "invalid_model_response"),
-            ({"candidates": [{"finishReason": "STOP", "content": {
-                "parts": [{"text": "private malformed answer"}]
-            }}]}, "invalid_model_response"),
+            (
+                {
+                    "candidates": [
+                        {
+                            "finishReason": "STOP",
+                            "content": {
+                                "parts": [{"text": "private malformed answer"}]
+                            },
+                        }
+                    ]
+                },
+                "invalid_model_response",
+            ),
         ):
-            with self.subTest(payload=payload), self.assertRaises(AssistantError) as failure:
+            with (
+                self.subTest(payload=payload),
+                self.assertRaises(AssistantError) as failure,
+            ):
                 self.generate(payload)
             self.assertEqual(str(failure.exception), code)
 
     def test_bad_requests_are_not_reported_as_missing_credentials(self):
-        for status, code in ((400, "provider_request_rejected"), (401, "provider_auth"),
-                             (403, "provider_auth"), (429, "provider_unavailable")):
-            with self.subTest(status=status), patch("urllib.request.urlopen", side_effect=
-                HTTPError("private-key", status, "private response", {}, None)):
+        for status, code in (
+            (400, "provider_request_rejected"),
+            (401, "provider_auth"),
+            (403, "provider_auth"),
+            (429, "provider_unavailable"),
+        ):
+            with (
+                self.subTest(status=status),
+                patch(
+                    "urllib.request.urlopen",
+                    side_effect=HTTPError(
+                        "private-key", status, "private response", {}, None
+                    ),
+                ),
+            ):
                 with self.assertRaises(AssistantError) as failure:
                     Gemini("private-key").generate([])
                 self.assertEqual(str(failure.exception), code)

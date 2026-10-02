@@ -23,7 +23,9 @@ class Gemini:
     def __init__(self, key: str, model: str = "gemini-3.8-flash"):
         if not isinstance(key, str) or not key.strip():
             raise AssistantError("missing_api_key")
-        if not isinstance(model, str) or not re.fullmatch(r"gemini-[a-zA-Z0-9.-]+", model):
+        if not isinstance(model, str) or not re.fullmatch(
+            r"gemini-[a-zA-Z0-9.-]+", model
+        ):
             raise AssistantError("invalid_settings")
         self._key = key.strip()
         self.model = model
@@ -31,7 +33,9 @@ class Gemini:
     @classmethod
     def configured(cls):
         path = Path(
-            os.environ.get("MONTAZ_ASSISTANT_CONFIG", Path.home() / ".config/montaz/assistant.json")
+            os.environ.get(
+                "MONTAZ_ASSISTANT_CONFIG", Path.home() / ".config/montaz/assistant.json"
+            )
         )
         try:
             settings = decode(path.read_bytes()) if path.exists() else {}
@@ -39,19 +43,21 @@ class Gemini:
             raise AssistantError("invalid_settings") from exc
         return cls(
             os.environ.get("GEMINI_API_KEY") or settings.get("gemini_api_key", ""),
-            os.environ.get("GEMINI_MODEL") or settings.get("gemini_model", "gemini-3.8-flash"),
+            os.environ.get("GEMINI_MODEL")
+            or settings.get("gemini_model", "gemini-3.8-flash"),
         )
 
-    def generate(self, parts: list[dict]) -> dict:
+    def generate(self, parts: list[dict], schema: dict | None = None) -> dict:
+        """`schema` asks the API to constrain the JSON shape; callers still validate."""
+        config = {
+            "responseMimeType": "application/json",
+            "temperature": 0.2,
+            "maxOutputTokens": 8192,
+        }
+        if schema is not None:
+            config["responseSchema"] = schema
         body = json.dumps(
-            {
-                "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "temperature": 0.2,
-                    "maxOutputTokens": 8192,
-                },
-            }
+            {"contents": [{"role": "user", "parts": parts}], "generationConfig": config}
         ).encode()
         request = urllib.request.Request(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
@@ -63,8 +69,10 @@ class Gemini:
                 data = decode(response.read(MAX_MESSAGE_BYTES + 1))
         except urllib.error.HTTPError as exc:
             code = (
-                "provider_auth" if exc.code in (401, 403)
-                else "provider_request_rejected" if exc.code == 400
+                "provider_auth"
+                if exc.code in (401, 403)
+                else "provider_request_rejected"
+                if exc.code == 400
                 else "provider_unavailable"
             )
             raise AssistantError(code) from None
@@ -85,12 +93,20 @@ class Gemini:
             finish = candidate.get("finishReason")
             if finish == "MAX_TOKENS":
                 raise AssistantError("provider_output_limit")
-            if finish in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}:
+            if finish in {
+                "SAFETY",
+                "RECITATION",
+                "BLOCKLIST",
+                "PROHIBITED_CONTENT",
+                "SPII",
+            }:
                 raise AssistantError("provider_blocked")
             if finish != "STOP":
                 raise AssistantError("invalid_model_response")
             text = "".join(
-                p.get("text", "") for p in candidate["content"]["parts"] if not p.get("thought")
+                p.get("text", "")
+                for p in candidate["content"]["parts"]
+                if not p.get("thought")
             )
             if not text.strip():
                 raise AssistantError("provider_empty_response")

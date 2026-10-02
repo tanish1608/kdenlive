@@ -184,4 +184,18 @@ limited. Earlier October 1 metrics above are historical.
 
 See [draft revision evidence](draft-revision.md). Draft ownership is session-only;
 save/reopen preserves the edit but does not authorize replacing saved clips.
-No later Claude handoff has been started automatically.
+Claude subsequently delivered landmark alignment and response validation on
+`codex/claude-match-landmarks` (`e186bc1`). The reviewed integration retains the
+newer native scale registration and draft ownership; see
+[landmark integration](landmark-integration.md).
+
+- [x] Integrate landmark alignment, source-resolution zoom limits and strict
+  provider answers; invalidate only the match cache (`object-match-7`).
+- [x] Validate the combined tracker, native checks and a real-wheel desktop
+  Apply/Undo/Redo/save/restart/export cycle.
+- [ ] Suggest compatible shots from bounded cached evidence before tracking.
+- [ ] Add an explicitly requested 8–12-frame montage with one shared framing
+  per shot, native trims and one Undo; see [sequencing handoff](handoff-match-sequencing.md).
+
+These remain selected-pair improvements. Local rim refinement, perspective
+compatibility, whips/wipes and native speed ramps are unfinished.

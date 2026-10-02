@@ -217,10 +217,15 @@ def validate_stability(comparison: dict) -> None:
         raise RuntimeError("Constant-size transform still has visible scale breathing")
     if stable_constant["decoded"]["size_change_rms"] > 0.008:
         raise RuntimeError("Constant-size decoded output has excessive size jitter")
-    if stable_truth["cut_center_max"] > 0.007 or stable_truth["cut_center_mean"] > 0.003:
+    if (
+        stable_truth["cut_center_max"] > 0.007
+        or stable_truth["cut_center_mean"] > 0.003
+    ):
         raise RuntimeError("Constant-size cut alignment exceeds the native tolerance")
     if stable_truth["cut_size_mean"] > 0.02:
-        raise RuntimeError("Constant-size cut size mismatch exceeds the native tolerance")
+        raise RuntimeError(
+            "Constant-size cut size mismatch exceeds the native tolerance"
+        )
     zoom_truth = zoom["truth_sweep"]
     if zoom_truth["rejected"]["helper"] != 0:
         raise RuntimeError("The zoom helper rejected a controlled valid window")
@@ -228,7 +233,10 @@ def validate_stability(comparison: dict) -> None:
     if stable_zoom["outgoing_scale"][0] <= stable_zoom["outgoing_scale"][1]:
         raise RuntimeError("The stable model lost the direction of a genuine zoom")
     stable_zoom_truth = zoom_truth["models"]["stable"]
-    if stable_zoom_truth["cut_size_mean"] > 0.05 or stable_zoom_truth["cut_size_max"] > 0.08:
+    if (
+        stable_zoom_truth["cut_size_mean"] > 0.05
+        or stable_zoom_truth["cut_size_max"] > 0.08
+    ):
         raise RuntimeError("Zoom cut size accuracy exceeds the native tolerance")
 
 
@@ -305,15 +313,28 @@ def main():
         model = "gemini-fixture"
         calls = 0
 
-        def generate(self, parts):
+        def generate(self, parts, schema=None):
             # Known fixture seeds replace only semantic selection. Tracking/geometry remain real.
             self.calls += 1
+
+            def native(b):
+                # Gemini's [ymin, xmin, ymax, xmax] on 0-1000.
+                return [
+                    b[1] * 1000,
+                    b[0] * 1000,
+                    (b[1] + b[3]) * 1000,
+                    (b[0] + b[2]) * 1000,
+                ]
+
             return dict(
                 reason="Controlled candidates",
                 candidates=[
-                    dict(reason="Zoomed background corner", boxes=ZOOMED),
-                    dict(reason="Controlled textured discs", boxes=DISC),
-                    dict(reason="Flat background corner", boxes=FLAT),
+                    dict(reason=r, subject=[native(b) for b in boxes], anchors=[])
+                    for r, boxes in (
+                        ("Zoomed background corner", ZOOMED),
+                        ("Controlled textured discs", DISC),
+                        ("Flat background corner", FLAT),
+                    )
                 ],
             )
 
@@ -321,11 +342,14 @@ def main():
         def __init__(self, provider):
             self.model, self.provider, self.calls = provider.model, provider, 0
 
-        def generate(self, parts):
+        def generate(self, parts, **options):
             self.calls += 1
-            return self.provider.generate(parts)
+            return self.provider.generate(parts, **options)
 
     real_native = match_cuts.native_frames
+    # The 320x180 synthetic discs would cap zoom at 1.1x on a 1080p canvas; the
+    # resolution limit has its own tests, so keep the native 2x ceiling here.
+    match_cuts.zoom_limit = lambda *_: 2.0
     helper = dict(calls=0, seeds=[])
 
     def native_frames(*arguments):

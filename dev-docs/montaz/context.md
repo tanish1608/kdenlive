@@ -404,3 +404,26 @@ Existing effect/subtitle timing gates stay strict. Manual anchor review and
 bounded candidate discovery are the next open parts of milestone 2, followed by
 measured whips/wipes and native ramps. See [draft revision evidence](draft-revision.md)
 for checks and remaining limits; no new Claude handoff was sent automatically.
+
+## Landmark integration — October 2
+
+Claude delivered `codex/claude-match-landmarks` (`e186bc1`) from `a5bfe52`.
+The reviewed merge retains newer native zoom registration and draft ownership.
+Whole-subject landmarks align their centroid and spacing through a central native
+track, using strict Gemini answer formatting and source-resolution zoom limits.
+Removed the older frame-one compensation because the current helper preserves
+its seed geometry. Match cache version 7 avoids the two branches' version-6
+collision. Landmark target sizes obey the native fraction contract.
+
+Combined validation passes 225 Python tests (ten live-helper checks), 40 Qt
+transport/seven chat tests and 1,208 controlled native assertions. A separate
+real-wheel desktop fixture passed comparison, Apply/one Undo/Redo, save and
+fresh-process reopen. Its native 1080p export contains 120 frames at 30000/1001 FPS.
+The live match used the hub and tyre top at up to 1.42× zoom: positioning improved,
+but perspective differences and substantial cropping remain visible. The historical
+four-wheel branch result is not a reproduced chain result for this merge.
+
+See [landmark integration](landmark-integration.md). Compatible-shot suggestions
+and a quick montage remain next, using explicit native order/timing contracts;
+local rim refinement, whips/wipes and native ramps remain unfinished. Do not
+describe the full transition set or finished film quality as complete.

@@ -78,7 +78,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   caching, stale-result rejection and native rendered geometry are exercised.
   Guarded size/center fitting and native fixed-seed scale registration reduce
   controlled jitter and recover bounded gradual zoom. Real footage still needs
-  calibration. See [stability evidence](match-stability-report.md).
+  calibration. Schema-constrained whole-subject landmarks now align centroid and
+  spacing using the current native seed geometry, with resolution-based zoom caps.
+  A real wheel pair passed desktop review, Apply/Undo/Redo, restart and native export.
+  Perspective and landmark accuracy remain limits; see
+  [landmark integration](landmark-integration.md) and [stability evidence](match-stability-report.md).
   This is a selected-pair prototype; it does not search the entire bin.
 - Still pending: deferred portrait framing, additional native failure checks,
   narration, audio pairing/ducking, musical phrase detection, word alignment,

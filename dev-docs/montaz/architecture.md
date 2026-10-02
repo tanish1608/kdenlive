@@ -261,7 +261,12 @@ retimed or inserted. General portrait framing remains deferred.
 
 A separate `montaz-tracker` executable reuses the installed MLT/OpenCV decoder and
 CSRT tracker; Python needs no vision package. Its native project-frame decoding
-supplies bounded images to one Gemini object-pair request. One-second boundary
+supplies bounded images to one schema-constrained Gemini whole-subject/landmark
+request. Valid corresponding landmarks supply a centroid and RMS spread; a
+central 60% subject region carries their rigid translation and scale. Landmarks
+reference the native seed frame; there is no frame-one size compensation. Weak
+landmarks fall back to subject-box alignment, not independent landmark tracking.
+One-second boundary
 windows are tracked at every project frame (up to 60 FPS). Low-frequency patch
 correlation rejects flat/disappearing regions; shape, motion and scale checks reject
 unstable tracks. These checks are conservative proxies, not calibrated object
@@ -278,7 +283,7 @@ while work is running; Stop terminates native helper work and discards late resu
 After native tracking, `match_stability.py` fits a robust log-height trend and
 local-linear centers under residual guards. Baseline acceptance gates run first;
 failed fitted geometry falls back to the original solution. At most two tracked
-pairs and one provider call remain. `object-match-6` invalidates changed geometry
+pairs and one provider call remain. `object-match-7` invalidates changed geometry
 without touching visual/speech/music evidence. A native fixed-seed scale-registration
 pass measures size around CSRT's predicted center with bounded search, confidence
 and ambiguity gates; it rejects disappearing or scale-ambiguous subjects instead of
@@ -286,16 +291,19 @@ accepting background tracking. See the stability report.
 
 Protocol-v3 reviews carry only allowlisted uniform numeric transform keyframes,
 source identities, native clip IDs and bounded JPEG boundary previews. Position and
-size share a common subject anchor, with at most 2× zoom and canvas coverage checks.
+size share a common subject anchor, with source-resolution zoom limits (1.6× for
+1080p on 1080p, up to 2× for 4K) and canvas coverage checks. The review target size
+remains a fraction no larger than one, including landmark spreads.
 The dock compares original/aligned boundary images; it is not a second player.
 The adapter rechecks selection, revision, sources, eligibility and native effect
 availability before adding two editable `qtblend` effects in one rollback-capable
-Undo batch. Existing source letterboxing can remain. Beat cuts, whips, occlusion
+Undo batch. Existing source letterboxing can remain. Beat cuts are implemented
+through the separate timing contract. Whips, occlusion
 wipes, speed ramps, manual anchors and multi-pair sequence optimization remain
 planned; no arbitrary model-provided effect expression is executed.
 
-CSRT size estimates are smoothed over five frames while retaining measured
-centers; large jumps still reject. The worker checks video-stream duration before
+Native size estimates receive guarded smoothing/fitting while retaining measured
+motion; large jumps still reject. The worker checks video-stream duration before
 tracking an uncached pair, so a longer audio/container tail cannot silently become
 a frozen visual match. Complete negative pairs are cached; tracking/provider
 errors are terminal and do not populate the cache.

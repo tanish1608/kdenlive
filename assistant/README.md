@@ -301,7 +301,11 @@ alignment remain future work.
 ## Object-aligned match cuts (prototype)
 
 Select two adjacent video-only shots on one unlocked track and choose **Match
-cut**. One Gemini request suggests up to three graphic-match object pairs. The
+cut**. One schema-constrained Gemini request suggests up to three whole-subject
+pairs with up to three corresponding landmarks. Valid landmarks align their
+centroid and spacing; missing or inconsistent landmarks retain subject-box
+alignment. Landmarks follow a tracked central subject region, rather than being
+tracked individually. The
 assistant ranks them by the crop each pair needs, drops shape/zoom failures and
 near-duplicates, and the native MLT/OpenCV helper tracks at most two pairs over
 short windows around the cut. Among pairs that pass the tracking and alignment
@@ -313,7 +317,8 @@ both clips in one Undo. Source trims, shot timing and ordering stay unchanged.
 
 Tracked subject size now uses a guarded robust trend fit, with local position
 smoothing. It retains the baseline when fitting cannot explain measured motion
-or satisfy existing coverage/zoom gates. Cache version `object-match-6`
+or satisfy existing coverage/zoom gates. Landmarks reference the exact native
+seed frame, preserving real first-frame translation and zoom. Cache version `object-match-7`
 invalidates older alignment geometry; other evidence caches are unchanged.
 The October 1 constant-size exports reduced size jitter from 1.13% to 0.42% per
 frame. Native fixed-seed scale registration now recovers the ten controlled zoom
@@ -330,7 +335,11 @@ cached separately from scene/speech analysis; failed or time-truncated runs are 
 without frames, paths or descriptions. The prototype requires progressive,
 square-pixel projects at up to 60 FPS, sources no larger than 128 MiB, and no
 existing bin/clip effects, persistent groups, speed changes or compositions.
-Zoom is capped at 2×; existing source letterboxing may remain.
+Zoom is limited by source resolution: 1.6× for 1080p on a 1080p canvas,
+up to the native 2× ceiling for 4K. Existing source letterboxing may remain.
+The combined implementation has a real-wheel desktop Apply/Undo/Redo/reopen/export
+check; perspective differences and inaccurate landmarks still affect quality.
+See [landmark integration](../dev-docs/montaz/landmark-integration.md).
 
 The development launcher supplies `MONTAZ_TRACKER` from the build's `bin/`
 directory. Building the editor with `BUILD_MONTAZ_ASSISTANT=ON` also builds the
