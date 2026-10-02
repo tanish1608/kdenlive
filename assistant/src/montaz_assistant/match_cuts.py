@@ -15,9 +15,11 @@ from typing import Callable
 from .contracts import FrameRate, Snapshot
 from .gemini import AssistantError, Gemini
 from .planning import MediaChildError, MediaTools
+from .match_stability import fit_centers, fit_heights, stability, triangle
 from .protocol import decode, fields, frame
 
-VERSION = "object-match-4"
+VERSION = "object-match-5"
+MODELS = ("baseline", "triangle9", "size-fit", "stable")
 MAX_CANDIDATES = 3
 MAX_TRACKED = 2
 # WorkerClient kills a match run 90 s after sending it. Keep 10 s for interpreter
@@ -117,16 +119,54 @@ def box(raw: object) -> list[float]:
     return raw
 
 
-def align(tracks: list[list[list[float]]]) -> tuple[dict, list[list[dict]]]:
-    """Keep subject height/center constant with aspect-preserving crops, capped at 2x."""
+def _model(boxes: list[list[float]], name: str, used: list[str]) -> list[list[float]]:
+    """Subject boxes for one track. Fits that do not explain it fall back to baseline."""
+    centers = [[b[0] + b[2] / 2, b[1] + b[3] / 2] for b in boxes]
+    widths = triangle([b[2] for b in boxes], 2)
+    heights = triangle([b[3] for b in boxes], 2)
+    if name == "triangle9":
+        widths = triangle([b[2] for b in boxes], 4)
+        heights = triangle([b[3] for b in boxes], 4)
+    elif name in {"size-fit", "stable"}:
+        fitted = fit_heights([b[3] for b in boxes])
+        used.append("size-trend" if fitted else "size-baseline")
+        if fitted:
+            # Keep each frame's smoothed aspect; only the size trend changes.
+            widths = [w / h * f for w, h, f in zip(widths, heights, fitted)]
+            heights = fitted
+    if name == "stable":
+        moved = fit_centers(centers, heights)
+        used.append("center-trend" if moved else "center-measured")
+        centers = moved or centers
+    return [
+        [c[0] - w / 2, c[1] - h / 2, w, h] for c, w, h in zip(centers, widths, heights)
+    ]
+
+
+def align(
+    tracks: list[list[list[float]]],
+    model: str = "stable",
+    used: list[str] | None = None,
+) -> tuple[dict, list[list[dict]]]:
+    """Keep subject height/center constant with aspect-preserving crops, capped at 2x.
+
+    `model` chooses the per-track subject estimate: "baseline" (five-frame size
+    average, measured centers), "triangle9" (nine-frame size average), "size-fit"
+    (robust exponential size trend) or "stable" (size trend plus local-linear
+    centers). Trend fits fall back to baseline when their residuals are large.
+    The baseline is always solved first, so every model accepts exactly the
+    evidence the baseline accepts; if a model's own boxes fail a zoom, step or
+    coverage gate, the baseline result is returned instead of a forced fit.
+    """
+    if model not in MODELS:
+        raise AssistantError("invalid_match_evidence")
+    used = [] if used is None else used
     for boxes in tracks:
         for b in boxes:
             box(b)
     # CSRT's integer boxes fluctuate by a few pixels even on stable subjects.
-    # Weighted size over five frames avoids breathing zoom; preserve measured centers.
     smoothed = []
     for boxes in tracks:
-        values = []
         for i, b in enumerate(boxes):
             if i and (
                 abs(b[0] - boxes[i - 1][0]) > 0.12
@@ -134,21 +174,25 @@ def align(tracks: list[list[list[float]]]) -> tuple[dict, list[list[dict]]]:
                 or max(b[3], boxes[i - 1][3]) / min(b[3], boxes[i - 1][3]) > 1.25
             ):
                 raise AssistantError("tracking_unavailable")
-            neighbors = [
-                (boxes[j], 3 - abs(j - i))
-                for j in range(max(0, i - 2), min(len(boxes), i + 3))
-            ]
-            weight = sum(w for _, w in neighbors)
-            width = sum(v[2] * w for v, w in neighbors) / weight
-            height = sum(v[3] * w for v, w in neighbors) / weight
-            values.append(
-                [b[0] + (b[2] - width) / 2, b[1] + (b[3] - height) / 2, width, height]
-            )
-        smoothed.append(values)
-    tracks = smoothed
-    ratios = [b[2] / b[3] for boxes in tracks for b in boxes]
+        smoothed.append(_model(boxes, "baseline", []))
+    # Shape compatibility is judged on the baseline estimate for every model.
+    ratios = [b[2] / b[3] for boxes in smoothed for b in boxes]
     if max(ratios) / min(ratios) > 1.3:
         raise AssistantError("no_match")
+    result = _solve(smoothed)
+    if model == "baseline":
+        return result
+    try:
+        return _solve([_model(boxes, model, used) for boxes in tracks])
+    except AssistantError as exc:
+        if exc.code not in {"no_match", "tracking_unavailable"}:
+            raise
+        used.append("geometry-baseline")
+        return result
+
+
+def _solve(tracks: list[list[list[float]]]) -> tuple[dict, list[list[dict]]]:
+    """Uniform scale/offset per frame for already modelled subject boxes."""
     all_boxes = [b for boxes in tracks for b in boxes]
     minimum = max(b[3] for b in all_boxes) * 1.03
     maximum = min(1.0, min(b[3] for b in all_boxes) * 2)
@@ -571,14 +615,17 @@ def propose_match(
         if tracks is None:
             continue
         try:
-            target, transforms = align(tracks)
+            used = []
+            target, transforms = align(tracks, used=used)
         except AssistantError as exc:
             if exc.code not in {"no_match", "tracking_unavailable"}:
                 raise
             outcome["outcome"] = "rejected"
             continue
         measured = metrics(transforms)
-        outcome.update(outcome="valid", **measured)
+        outcome.update(
+            outcome="valid", models=used, **measured, **stability(transforms)
+        )
         if best is None or round(measured["cost"], 9) < round(best[3]["cost"], 9):
             best = (position, target, transforms, measured)
     operations, target, status = [], {"x": 0.5, "y": 0.5, "height": 0}, "no_match"

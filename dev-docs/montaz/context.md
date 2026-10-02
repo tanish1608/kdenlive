@@ -367,3 +367,21 @@ See [editorial duration](editorial-duration.md) for comparisons, tests and limit
 This improves duration coverage; silent sound, framing, busy shots and unresolved
 action cuts still prevent claiming a complete high-quality travel film.
 Claude's stability work is complete and undergoing separate integration checks.
+
+### Reviewed stability integration, October 1
+
+Claude `69ad410` adds guarded robust log-height and local-linear center fits,
+retaining original acceptance/coverage/zoom gates and bounded calls. Match geometry
+cache is now `object-match-5`; visual/speech/music caches and protocol-v3 remain.
+The original branch is preserved. Codex corrected the comparison tool so failed
+zoom exports cannot be reported as success. Combined 200 Python (six real-helper),
+39 transport/seven chat checks, native tests and nine controlled exports pass.
+Separate desktop comparison/Apply/one Undo/Redo/playback/save/fresh reopen pass.
+
+Constant fixture decoded size jitter falls from 1.13% to 0.42%; the tracker still
+misses/delays genuine zoom and the zoom truth sweep remains inaccurate. Do not
+claim reliable zoom tracking or a completed travel film. The 320×180 desktop
+fixture also retains an incoming size trend, illustrating resolution/seed limits.
+See [stability evidence](match-stability-report.md) and the updated completion plan.
+Next: native assistant-draft replacement, beat-before-match workflow and separately
+assigned bounded candidate discovery; robust native zoom remains open.

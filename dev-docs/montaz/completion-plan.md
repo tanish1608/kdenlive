@@ -62,23 +62,23 @@ completed `codex/claude-match-cut-candidates` branch. With a clean worktree, cre
 branch. Read root `AGENTS.md`, this plan, `collaboration.md`, `context.md`, and
 `quality-review.md` before implementation.
 
-- [ ] **S1 — Establish a reproducible baseline.** Separate translation, scale
+- [x] **S1 — Establish a reproducible baseline.** Separate translation, scale
   change and scale acceleration in private QA reports. Keep existing crop/motion
   metrics comparable. Explain why the present five-frame smoothing still breathes.
-- [ ] **S2 — Stabilize without falsifying tracking.** Compare a small number of
+- [x] **S2 — Stabilize without falsifying tracking.** Compare a small number of
   deterministic fits/smoothers. Reduce size jitter while preserving real zoom and
   subject movement, exact boundary alignment, uniform aspect ratio, 2× ceiling,
   full canvas coverage and existing rejection gates. Reject unsafe fits rather
   than forcing a match. Do not add CV/ML dependencies or provider calls.
-- [ ] **S3 — Exercise difficult evidence.** Include stable-size moving objects,
+- [x] **S3 — Exercise difficult evidence.** Include stable-size moving objects,
   genuine gradual zoom, short windows, edge-constrained objects, discontinuous
   motion/appearance, first-pair rejection, all failures and deterministic ties.
   Evaluate boundary error and motion throughout both windows, not only two stills.
-- [ ] **S4 — Preserve lifecycle and identity.** Keep one Gemini call, at most two
+- [x] **S4 — Preserve lifecycle and identity.** Keep one Gemini call, at most two
   tracked pairs, current deadlines/Stop, terminal error classification and strict
   protocol-v3 output. Bump match cache version when output geometry changes;
   preserve scene/speech/music caches and the native synchronization fix.
-- [ ] **S5 — Deliver evidence.** Extend controlled QA to export comparable
+- [x] **S5 — Deliver evidence.** Extend controlled QA to export comparable
   baseline/candidate videos. Provisional goal: halve RMS frame-to-frame scale
   change on constant-size fixtures without worsening existing boundary tolerances;
   genuine zoom must retain direction and acceptable fit error. Record crop, maximum
@@ -150,6 +150,24 @@ required by the agreed completion scope; do not silently add another provider.
 Duration feasibility, one-call underfill recovery and native before/after export
 checks are implemented. See [editorial duration evidence](editorial-duration.md),
 including restrictive-brief negatives and remaining visual/audio limits. Claude's
-`codex/claude-match-stability` at `69ad410` is complete and under integration review.
+`codex/claude-match-stability` at `69ad410` is reviewed and integrated locally,
+with its zoom-tracking limitation documented.
 Later milestones remain open; immediate duration improvement is not completion
 of the full film-quality target.
+
+
+## Integrated milestone 1 checkpoint
+
+Claude S1–S5 evidence is delivered and reviewed; guarded size/center smoothing is
+accepted as a targeted improvement. See [stability review](match-stability-report.md).
+The controlled constant-size fixture meets the jitter criterion; genuine zoom
+correspondence does not yet meet the desired accuracy. Combined validation passes
+200 Python, 39 transport/seven chat checks, full native tests and nine controlled
+exports, plus separate desktop Apply/Undo/Redo/save/reopen checks.
+
+Next Codex implementation: review/replace the assistant's own draft through native
+commands and make beat alignment precede object matching explicitly. Existing
+manual edits, audio and subtitles must survive. Next separately assignable Claude
+work: bounded cached-evidence candidate discovery as described above. Native zoom
+estimation remains a focused Codex follow-up before advertising reliable zooming
+matches. No later handoff has been started automatically.

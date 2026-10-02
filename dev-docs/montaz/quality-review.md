@@ -402,3 +402,21 @@ are still open; no better complete travel film is claimed.
 Private reproduction outputs are in
 `~/Movies/montaz-candidate-review-20261001/integrated-match-fixed/` and
 `integrated-beats/`; they remain outside Git. No push or release was performed.
+
+## Duration and stability integration — October 1
+
+Same-brief cached Goa comparisons and native exports are documented in
+[duration evidence](editorial-duration.md). The varied candidate delivers 563
+frames versus 472 at baseline; one existing review expands 502 to 563. A separate
+desktop run delivers 586 frames / 19.6 seconds for 20. Restrictive coastal material
+correctly stays shorter. First/middle/last shot frames reveal remaining busy
+traffic, short train glimpse, unresolved fort pan, pillarboxing and no soundtrack.
+
+Claude's [stability delivery](match-stability-report.md) is independently reviewed:
+constant-size decoded jitter 1.13% → 0.42%, with nine native exports passing. The
+zoom sweep still has 11–14% size error and rejected tracks. The desktop 320×180
+fixture preserves an incoming size trend; thresholds are not universally proven.
+200 combined Python checks, 39/7 Qt checks and full native tests pass, together
+with separate desktop Apply/one Undo/Redo/save/reopen checks for both changes.
+These improve duration coverage and controlled alignment; complete travel-film
+quality, native draft replacement, motion transitions and robust zoom remain open.

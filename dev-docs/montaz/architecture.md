@@ -259,6 +259,13 @@ speech analyses are preserved. Ordered finding/tracking progress, a 90-second ru
 cap, a clean worker exit and explicit terminal outcomes keep Apply unavailable
 while work is running; Stop terminates native helper work and discards late results.
 
+After native tracking, `match_stability.py` fits a robust log-height trend and
+local-linear centers under residual guards. Baseline acceptance gates run first;
+failed fitted geometry falls back to the original solution. At most two tracked
+pairs and one provider call remain. `object-match-5` invalidates changed geometry
+without touching visual/speech/music evidence. These fits reduce quantization
+noise; they cannot correct CSRT's missed/delayed zoom. See the stability report.
+
 Protocol-v3 reviews carry only allowlisted uniform numeric transform keyframes,
 source identities, native clip IDs and bounded JPEG boundary previews. Position and
 size share a common subject anchor, with at most 2× zoom and canvas coverage checks.

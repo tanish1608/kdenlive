@@ -101,7 +101,8 @@ Python filenames above are under `assistant/src/montaz_assistant/`.
 Protocol changes require both Python and native validators/tests; do not add
 fields to an existing envelope assuming they will be ignored.
 
-The latest match cache version is `object-match-4`. It keys complete candidate
+The latest match cache version is `object-match-5` after the reviewed stability
+integration; see `match-stability-report.md`. It keys complete candidate
 evidence by source hashes, source windows, canvas, rational FPS, Gemini model and
 algorithm version. Empty or geometrically unsuitable candidate sets are cacheable;
 provider failures, runs where every tracked pair failed, and budget-truncated runs

@@ -296,6 +296,14 @@ a confidence score. **Compare alignment** shows original and proposed boundary
 frames. **Apply alignment** adds editable Transform effects to
 both clips in one Undo. Source trims, shot timing and ordering stay unchanged.
 
+Tracked subject size now uses a guarded robust trend fit, with local position
+smoothing. It retains the baseline when fitting cannot explain measured motion
+or satisfy existing coverage/zoom gates. Cache version `object-match-5`
+invalidates older alignment geometry; other evidence caches are unchanged.
+Controlled exports reduce size jitter from 1.13% to 0.42% per frame. Real zoom
+tracking remains unreliable, and small genuine size changes can be flattened;
+review motion after Apply. See [stability evidence](../dev-docs/montaz/match-stability-report.md).
+
 An empty answer finishes as **No match**. Unstable tracking, excessive cropping,
 missing media or provider errors never apply an effect. If the helper rejects
 every tracked pair, the run fails rather than reporting No match. A second pair is
