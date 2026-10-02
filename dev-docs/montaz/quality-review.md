@@ -322,5 +322,83 @@ musical taste, phrase detection or a better complete travel film.
 148 Python tests passed, two optional tracker tests skipped; 39 Qt transport and
 seven chat checks passed. The editor/native tests built, and full native tests
 plus the independent controlled render check passed. Reproduce the evidence and
-read algorithm limitations in [music timing](music-timing.md). Claude's object
-candidate improvements remain isolated and unmerged.
+read algorithm limitations in [music timing](music-timing.md). This checkpoint predates integration of Claude's object candidate improvements
+(see the Codex checkpoint below).
+
+## Multi-candidate match selection
+
+Claude implementation evidence from `codex/claude-match-cut-candidates`, before
+the Codex corrections and integration checkpoint below. One Gemini
+request now returns up to three seed pairs for the two selected clips; at most
+two are tracked and the valid pair with the lowest crop/motion cost is proposed.
+Definitions: zoom is the largest uniform scale; crop is the mean of
+`1 - 1/scale²` over all 60 keyframes; motion is the mean per-frame largest canvas
+displacement of any source corner added by the reframing; cost = crop + 10 × motion.
+
+**Offline fixture (no provider call).** `check_match_quality.py` offers pairs in
+the order zoom-heavy corner, discs, flat corner. Seed crop ranks them flat, discs,
+zoom-heavy. The real helper rejects the flat pair after one outgoing track; the
+incoming track is skipped. The disc pair is selected at 1.23× zoom, 28% cropped
+and 1.17% canvas motion per frame (cost 0.396). The third pair is never tracked.
+One provider call, five helper calls and 1.9 seconds are recorded. A repeat
+request reuses the cache in 0.001 seconds with no provider or helper calls.
+Keyframes cover outgoing clip frames 30–59 and incoming frames 0–29, which are
+timeline frames 30–59 and 60–89 around the cut at frame 60. Source frames match
+clip frames because `in_frame` is 0. Native apply, one Undo, Redo, MLT
+serialization and export pass with 603 assertions in 7 test cases. The H.264
+export is 1920×1080 at 30000/1001 FPS with exactly 120 frames.
+
+**Live Gemini (`gemini-3.8-flash`, synthetic frames only).** The model returned one
+pair, the textured discs, rather than padding to three. It tracked and matched at
+1.25× zoom, 27% cropped and 1.06% motion per frame. The run took 5.1 seconds with
+one provider call and four helper calls. This is one sample, not a quality claim.
+
+Most of the measured motion is residual per-frame scale change: about 0.9–1.3%
+zoom change per frame after size smoothing. Translation is about 0.4–0.5% of the
+canvas per frame. CSRT box jitter can still produce slight breathing on review.
+The cost weight is a documented editorial choice, not a calibrated perceptual
+model. Ranking uses seed boxes only, so a third pair can be skipped even when it
+would have tracked better. The Claude handoff did not include a Goa re-run or desktop Apply/Undo; Codex
+subsequently exercised these gates as recorded below.
+
+Validation: 158 Python checks discovered: 156 pass and the two optional native
+helper checks skip by default. Run separately with the branch's
+`montaz-tracker`, both helper checks pass. 38 Qt transport, seven chat checks,
+native `assistanttest` and the controlled rendered QA also pass.
+
+## Codex candidate review and integration
+
+Claude commit `659920b` was preserved. Review fixes in `856dd6c` reject enormous
+and slightly out-of-frame boxes, validate cached previews against native
+canonical base64/JPEG boundaries, and distinguish explicit seeded rejection
+(exit 5) from terminal decoder/filter failures and crashes. `object-match-4`
+avoids ambiguous older failed-track evidence. Protocol-v3 is unchanged.
+
+A desktop fresh reopen uncovered a separate native integration bug: Transform
+position keys lacked matching constant rotation/anchor keys. The adapter now
+creates these siblings, preventing automatic keyframe repairs. Native regressions
+check matching positions and that loading the keyframe model changes no parameters.
+Desktop comparison, Apply, one Undo/Redo and save were exercised on synthetic
+footage; both effects save 30 matching keys for all three animated parameters.
+A fresh-process reopen loads both editable effects, clears the assistant session,
+and emits no missing-keyframe repairs.
+
+The combined branch passes **169 Python tests**, including the two real tracker
+tests, **39 Qt transport and seven chat checks**, and native `assistanttest`.
+After the native fix, controlled QA passes **807 assertions in eight test cases**,
+including real tracking, Apply/Undo/Redo, serialization and a **120-frame**
+1920×1080 export at 30000/1001 FPS. The flat seed fails, the discs win, and the
+third pair stays untracked; cache reuse makes zero provider/helper calls. The
+combined beat fixture also preserves all 150 frames and byte-identical audio.
+
+Read-only checks of the latest Goa river/pool and pool/coast cuts return empty
+candidate sets in 7.13 and 5.64 seconds. Repeats reuse cached negatives with no
+calls; no forced transforms or user-project edits occur. The integrated desktop
+Gemini run returns one textured-disc pair at 1.20× zoom, 28% crop and 1.02%
+canvas motion per frame. This remains a narrow integration check. Zoom breathing,
+seed-only ranking, uncalibrated motion weighting and wider candidate discovery
+are still open; no better complete travel film is claimed.
+
+Private reproduction outputs are in
+`~/Movies/montaz-candidate-review-20261001/integrated-match-fixed/` and
+`integrated-beats/`; they remain outside Git. No push or release was performed.

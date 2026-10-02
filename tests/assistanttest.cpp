@@ -690,6 +690,20 @@ TEST_CASE("Object match cuts add native transforms atomically", "[Montaz]")
                 const auto data = model->getAllParameters();
                 auto found = std::find_if(data.begin(), data.end(), [](const auto &v) { return v.first == QStringLiteral("rect"); });
                 REQUIRE(found != data.end());
+                const auto positions = [](const QString &animation) {
+                    QStringList result;
+                    for (const auto &key : animation.split(QLatin1Char(';')))
+                        result.append(key.section(QLatin1Char('='), 0, 0));
+                    return result;
+                };
+                for (const auto &parameter : data) {
+                    if (parameter.first == QStringLiteral("rotation") || parameter.first == QStringLiteral("rotate_anchor")) {
+                        REQUIRE(positions(parameter.second.toString()) == positions(found->second.toString()));
+                    }
+                }
+                // Loading the editable keyframe model must not repair missing sibling keys.
+                model->prepareKeyframes();
+                REQUIRE(model->getAllParameters() == data);
                 if (i == 0) {
                     stored = found->second.toString();
                     REQUIRE(stored.startsWith(QString::number(2 + 10 - length) + QLatin1Char('=')));

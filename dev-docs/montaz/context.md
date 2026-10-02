@@ -284,21 +284,24 @@ packaging/publication remain deferred.
 
 The user accepted a first object-aligned match-cut prototype before the remaining
 beat/whip/wipe/ramp work. Two adjacent selected video-only instances are captured
-against the native revision. Gemini selects one compatible object pair or an
-explicit empty answer; a separate bounded `montaz-tracker` uses existing MLT and
-OpenCV CSRT to decode/track every frame of the outgoing last/incoming first second.
+against the native revision. One Gemini request returns up to three compatible
+object pairs or an explicit empty answer; Python ranks them geometrically and a
+separate bounded `montaz-tracker` uses existing MLT and OpenCV CSRT to
+decode/track at most two pairs over every frame of the outgoing last/incoming
+first second, keeping the valid pair with the lowest crop/motion cost.
 Uniform native Transform crops align centers and apparent heights, capped at 2×,
 with shape, appearance, motion and canvas-coverage gates. Size smoothing prevents
 integer tracking-box jitter becoming breathing zoom. Video-stream tail checks
-avoid frozen audio-only tails. The separate `object-match-2` cache retains complete
-pair evidence by content, trim, FPS, canvas and model; source hashes are rechecked.
+avoid frozen audio-only tails. The separate `object-match-4` cache retains complete
+candidate evidence by content, trim, FPS, canvas and model; source hashes are rechecked.
 
 The right dock has Match cut, a two-by-two original/aligned boundary comparison,
 explicit Apply and Stop. Native application preserves source/timing/IDs, checks
 selection, revision, replay and file identity, and commits one Undo. Persistent
 clip groups remain ineligible; temporary multi-selection is supported through a
 small TimelineModel query. No manual anchor correction, full-bin candidate search,
-beat measurement, whip/wipe recognition or time-remap proposal exists yet.
+whip/wipe recognition or time-remap proposal exists yet. Beat estimates were added
+in the subsequent rhythm checkpoint below.
 
 The editor/helper compile with Craft. 142 Python checks run (140 pass, two optional
 native checks skipped); both optional real tracker checks pass separately. 38 Qt
@@ -329,4 +332,22 @@ periodicity without changing the project. 148 Python checks pass (two optional
 tracker checks skipped), 39/7 Qt transport/chat checks pass, and the editor/full
 native tests plus the independent render check pass. See [music timing](music-timing.md).
 Downbeats/phrases, variable-tempo evaluation and complete film quality remain open;
-Claude's branch is not reviewed or merged until the user reports completion.
+Claude's completed candidate branch has now been reviewed; see the integration
+checkpoint below.
+
+### Candidate integration checkpoint, October 1
+
+Claude's M1–M5 implementation is accepted with Codex corrections for oversized
+coordinates, cached JPEG validation and terminal native-helper failures. Cache
+version 4 invalidates ambiguous older failures; protocol-v3 stays unchanged.
+One Gemini call offers up to three pairs, with at most two tracked locally.
+The integrated branch also retains protocol-v4 beat estimates.
+
+Desktop comparison, Apply, one Undo/Redo and saving were exercised on synthetic
+clips. Fresh loading exposed unsynchronized Transform rotation keys; the native
+adapter now creates constant rotation/anchor keys at every position key.
+A fresh-process reopen loads both effects without keyframe repairs and clears
+the assistant session. Goa's two existing cuts still return no compatible objects; their complete
+negative results reuse cache without provider/helper calls. No user draft was
+changed and no improved complete travel film is claimed. Detailed validation
+and outstanding tracking limits are in [output review](quality-review.md).

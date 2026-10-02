@@ -623,18 +623,28 @@ QString Montaz::EditorAdapter::applyMatch(const QJsonObject &context, const QJso
             if (!stack->appendEffectWithUndo(QStringLiteral("qtblend"), undo, redo).first) return false;
             const auto model = stack->getAssetModelById(QStringLiteral("qtblend"));
             if (!model) return false;
-            QStringList values;
+            QStringList values, rotations, anchors;
             for (const auto v : op.value("keyframes").toArray()) {
                 const auto k = v.toObject();
                 const double s = k.value("scale").toDouble();
+                const int frame = timeline->getClipIn(id) + k.value("frame").toInt();
+                rotations.append(QStringLiteral("%1=0").arg(frame));
+                anchors.append(QStringLiteral("%1=0.5 0.5 0 0").arg(frame));
                 values.append(QStringLiteral("%1=%2 %3 %4 %5 1")
-                                  .arg(timeline->getClipIn(id) + k.value("frame").toInt())
+                                  .arg(frame)
                                   .arg(k.value("x").toDouble() * width, 0, 'f', 6)
                                   .arg(k.value("y").toDouble() * height, 0, 'f', 6)
                                   .arg(s * width, 0, 'f', 6)
                                   .arg(s * height, 0, 'f', 6));
             }
             model->setParameter(QStringLiteral("rect"), values.join(QLatin1Char(';')));
+            // Kdenlive expects every animated parameter to share the same key positions
+            // when loading an effect. Keep unused rotation parameters constant at those keys.
+            model->setParameter(QStringLiteral("rotation"), rotations.join(QLatin1Char(';')));
+            const auto parameters = model->getAllParameters();
+            if (std::any_of(parameters.begin(), parameters.end(), [](const auto &p) { return p.first == QStringLiteral("rotate_anchor"); })) {
+                model->setParameter(QStringLiteral("rotate_anchor"), anchors.join(QLatin1Char(';')));
+            }
             model->setParameter(QStringLiteral("distort"), QStringLiteral("0"));
             return true;
         },

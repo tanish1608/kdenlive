@@ -64,7 +64,7 @@ for a reviewed match cut is allowed. Do not ship installers or publish the repo.
 4. **Transport is versioned JSON lines over QProcess**, not HTTP, WebSockets,
    CRDT or another orchestration framework. Strict schemas reject unknown fields,
    duplicates, invalid numbers, stale revisions, changed sources and replay.
-   Wire version 1 is distinct from operation-specific proposal versions 1/2/3.
+   Wire version 1 is distinct from operation-specific proposal versions 1/2/3/4.
 5. **Stop and failure settle the run.** Own and terminate subprocesses, discard
    late results, preserve complete cached evidence, require a clean worker exit
    before Apply, and never label failed review as approval.
@@ -87,19 +87,21 @@ older milestone sections in the integration guide are historical evidence.
 | Worker / lifecycle | One request per process, strict messages, bounded deadlines, ordered progress, clean exit | `src/assistant/workerclient.*`; Python `worker.py`, `protocol.py`, `lifecycle.py`, `contracts.py` |
 | Visual planning | Two-source analysis concurrency, sampled silent windows, usable trims, content cache, postcard/adventure/diary pacing, no repeated source content | Python `planning.py`, `gemini.py` |
 | Draft review | One cached-evidence review and at most one same-duration revision; unavailable remains explicit | Python `editorial.py` |
-| Music / timing | ElevenLabs instrumental, raw/prepared reuse, native audio insertion, -18 LUFS target, fades; small cut shifts to energy accents | Python `music.py`, `timing.py`; native adapter |
+| Music / timing | ElevenLabs instrumental, raw/prepared reuse, native audio insertion, -18 LUFS target, fades; small cut shifts to estimated beats with accent fallback | Python `music.py`, `beats.py`, `timing.py`; native adapter |
 | Sound effects | Described ElevenLabs sound at playhead; up to three cached-visual foley suggestions, separately generated/reviewed | Python `effects.py`, `sound_cues.py` |
 | Captions | Selected original audio only, silence skipping, separate speech cache, reviewed native subtitles; Clean/Bold/Original without recreating events | Python `captions.py`; native adapter and subtitle model |
-| Object match | Two adjacent video-only clips; one Gemini seed pair, native CSRT tracks, bounded uniform Transform animations, static comparison, one Undo | Python `match_cuts.py`; `src/assistant/matchtracker.cpp`; dock/adapter/contracts |
+| Object match | Two adjacent video-only clips; one Gemini request for ≤3 seed pairs, ≤2 native CSRT-tracked pairs, lowest crop/motion cost, bounded uniform Transform animations, static comparison, one Undo | Python `match_cuts.py`; `src/assistant/matchtracker.cpp`; dock/adapter/contracts |
 | Local dependencies | Craft runtime staging and optional scoped Qt Cocoa accessibility ownership backport | `assistant/tools/prepare_craft_macos.py`, `run_craft_macos.sh`, `qt-cocoa/` |
 
 Python filenames above are under `assistant/src/montaz_assistant/`.
 Protocol changes require both Python and native validators/tests; do not add
 fields to an existing envelope assuming they will be ignored.
 
-The latest match cache version is `object-match-2`. It keys complete pair evidence
-by source hashes, source windows, canvas, rational FPS, Gemini model and algorithm
-version. Empty semantic pairs are cacheable; provider/tracking failures are not.
+The latest match cache version is `object-match-4`. It keys complete candidate
+evidence by source hashes, source windows, canvas, rational FPS, Gemini model and
+algorithm version. Empty or geometrically unsuitable candidate sets are cacheable;
+provider failures, runs where every tracked pair failed, and budget-truncated runs
+are not.
 Only selected sources are read, with a 128 MiB per-source prototype limit.
 
 Match eligibility requires normal-speed, adjacent VideoOnly instances on one
@@ -141,18 +143,49 @@ render QA pass. Re-run relevant checks and report the new counts.
 Complete **M1–M5 together in one focused PR**. Improve selection within the two
 already selected clips; do not search/reorder the whole project in this PR.
 
-- [ ] **M1 — Offer multiple credible seeds in one Gemini call.** Request at most
+Status (October 1, 2026): implemented by Claude on `codex/claude-match-cut-candidates`
+and reviewed by Codex. The local integration includes the corrections below and
+the separate beat-timing work; no upstream push or public PR is planned.
+
+Codex committed Python review corrections as `856dd6c` on
+`codex/review-match-cut-candidates`:
+reject enormous and slightly out-of-frame model coordinates before tracking;
+validate cached previews against native canonical base64/JPEG boundaries; retain
+media-child exit status so only explicit seeded subject rejection (status 5)
+permits trying another pair. Decoder/filter failures, crashes and timeouts stay
+terminal. This is a small internal `MediaChildError` addition to the shared media
+utility; the public error codes, native helper and final protocol-v3 envelope are
+unchanged. Cache version 4 prevents reusing version-3 evidence with ambiguous
+failed-track provenance. Added regression checks cover each correction. Desktop reload also exposed a
+pre-existing Transform keyframe inconsistency: position was animated while
+rotation/rotation-anchor remained at their default key. Integration synchronizes
+these constant parameters with position, with a native loading regression.
+
+- [x] **M1 — Offer multiple credible seeds in one Gemini call.** Request at most
   three candidate object pairs from the same two native seed images. Define a
   strict bounded internal schema and validate coordinates, reasons, lengths,
   numeric types and duplicates. Empty candidates remain valid. Do not add an
   automatic provider retry or loosen protocol-v3 output validation.
-- [ ] **M2 — Choose locally, with bounded tracking.** Deduplicate candidates and
+  *Outcome:* `parse_candidates()` accepts exactly `{reason, candidates}` with at
+  most three `{reason, boxes:[outgoing, incoming]}` entries; unknown/missing
+  fields, blank or over-long reasons (UTF-16 units, as native counts), bool,
+  nonfinite, string or out-of-frame coordinates fail as `invalid_match_evidence`
+  before any tracking. Duplicate JSON keys fail in the decoder; repeated pairs
+  are collapsed in M2. Malformed answers previously surfaced as `invalid_request`.
+- [x] **M2 — Choose locally, with bounded tracking.** Deduplicate candidates and
   deterministically order them using explicit geometric criteria. Track at most
   two candidate pairs (four tracked windows), reusing the original seed images.
   Select the valid result with the lowest documented crop/motion cost and stable
   tie-breaking. Reuse existing tracking/alignment gates; no new CV dependency,
   arbitrary “confidence” score, retiming, source substitution or automatic Apply.
-- [ ] **M3 — Preserve lifecycle/cache semantics.** Respect the current 90-second
+  *Outcome:* `rank()` runs each seed pair through `align()`; failures are skipped
+  untracked. Order: least seed crop, closest aspect, larger smaller subject, then
+  provider order. A pair overlapping a better pair by ≥0.5 IoU on both sides is a
+  duplicate. The top two are tracked from the same seed frames. `metrics()`
+  defines zoom, crop = mean `1 - 1/scale²` and motion = mean per-frame largest
+  canvas displacement of any source corner; cost = crop + 10 × motion. Lowest
+  rounded cost wins, ties keep the earlier rank.
+- [x] **M3 — Preserve lifecycle/cache semantics.** Respect the current 90-second
   native deadline and local cancellation; do not launch another candidate without
   sufficient remaining budget. Cancellation, authentication, malformed output,
   media changes and timeouts remain terminal. An unstable candidate may permit
@@ -161,17 +194,32 @@ already selected clips; do not search/reorder the whole project in this PR.
   meaning changes. Preserve scene/speech caches and the existing final wire
   envelope plus finding/tracking progress. New native progress fields are out of
   scope. No second model request for alternate objects.
-- [ ] **M4 — Add meaningful regressions.** Cover first candidate unusable / second
+  *Outcome:* the first pair is always tracked as before; a second starts only if
+  35 s (two 15 s helper timeouts plus a re-hash) remain of an 80 s Python budget
+  inside the native 90 s deadline. Stop is checked before each pair. A helper
+  rejection (`tracking_unavailable`) moves to the next pair; every other error is
+  terminal. If every tracked pair fails, the run fails `tracking_unavailable`
+  and nothing is cached. Budget-truncated runs return their result uncached.
+  Cache version `object-match-3`; the wire review and finding/tracking progress
+  are unchanged.
+- [x] **M4 — Add meaningful regressions.** Cover first candidate unusable / second
   valid, all unsuitable, all tracking failures, empty candidates, duplicates,
   malformed/nonfinite/bool coordinates, tie-breaking, source changes, Stop
   between candidates, budget exhaustion and content-cache reuse. Verify provider
   and tracker invocation ceilings. Use synthetic evidence; mock external services.
-- [ ] **M5 — Return reproducible output evidence.** Extend the controlled QA tool
+  *Outcome:* 16 new tests in `MatchCandidateTests` cover each listed case,
+  including inconsistent cache entries treated as misses, steadier-track preference,
+  and one provider call with at most six helper calls.
+- [x] **M5 — Return reproducible output evidence.** Extend the controlled QA tool
   to exercise the new selection path, preserving its native apply/Undo/export
   checks. Report chosen-candidate rationale, zoom, crop/motion metric definitions,
   call counts, elapsed time, exact frames and cache reuse. Separate the offline
   provider fixture from any optional live Gemini result. Update this checklist,
   assistant usage and quality notes with actual outcomes and remaining limits.
+  *Outcome:* `check_match_quality.py` now offers flat, disc and zoom-heavy pairs.
+  Real tracking rejects the flat pair, selects the disc and never tracks the third,
+  then the native apply/Undo/export checks pass. `selection-report.json` records the
+  metrics; see [quality review](quality-review.md#multi-candidate-match-selection).
 
 Expected changes: `match_cuts.py`, a small helper module if useful,
 `assistant/tests/test_match_cuts.py`, optional native-helper fixture tests,

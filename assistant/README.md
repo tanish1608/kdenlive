@@ -282,15 +282,22 @@ alignment remain future work.
 ## Object-aligned match cuts (prototype)
 
 Select two adjacent video-only shots on one unlocked track and choose **Match
-cut**. Gemini suggests one graphic-match object pair; the native MLT/OpenCV helper
-tracks short windows around the cut. **Compare alignment** shows original and
-proposed boundary frames. **Apply alignment** adds editable Transform effects to
+cut**. One Gemini request suggests up to three graphic-match object pairs. The
+assistant ranks them by the crop each pair needs, drops shape/zoom failures and
+near-duplicates, and the native MLT/OpenCV helper tracks at most two pairs over
+short windows around the cut. Among pairs that pass the tracking and alignment
+gates, the lowest crop/motion cost wins; the review reason names the chosen pair,
+its zoom, cropped area and added reframing motion. These are geometric costs, not
+a confidence score. **Compare alignment** shows original and proposed boundary
+frames. **Apply alignment** adds editable Transform effects to
 both clips in one Undo. Source trims, shot timing and ordering stay unchanged.
 
-An empty pair finishes as **No match**. Unstable tracking, excessive cropping,
-missing media or provider errors never apply an effect. Stop kills helper work;
-valid completed pair evidence and empty selections are cached separately from
-scene/speech analysis. Run logs contain phases, model, cache use and outcome,
+An empty answer finishes as **No match**. Unstable tracking, excessive cropping,
+missing media or provider errors never apply an effect. If the helper rejects
+every tracked pair, the run fails rather than reporting No match. A second pair is
+tracked only while enough of the 90-second limit remains. Stop kills helper work
+and starts no further pair. Complete candidate evidence and empty answers are
+cached separately from scene/speech analysis; failed or time-truncated runs are not. Run logs contain phases, model, cache use and outcome,
 without frames, paths or descriptions. The prototype requires progressive,
 square-pixel projects at up to 60 FPS, sources no larger than 128 MiB, and no
 existing bin/clip effects, persistent groups, speed changes or compositions.
@@ -308,7 +315,12 @@ python3 assistant/tools/check_match_quality.py \
   --output-dir /private/review/match-cut-check
 ```
 
-This generates moving textured objects outside Git and exercises real tracking,
-source-frame offsets, native application, Undo/Redo, effect serialization and
-export. General portrait framing, manual anchor correction, multi-pair selection,
+This generates moving textured objects outside Git and offers three fixed seed
+pairs. Real tracking rejects a flat-background pair, selects the disc pair and
+never tracks the zoom-heavy third. It then exercises source-frame offsets, native
+application, Undo/Redo, effect serialization and export. `selection-report.json`
+records call counts, timing, frames, metrics and cache reuse. `--live-gemini`
+adds one separately labelled request with the configured key on the same
+synthetic frames; that answer never feeds the native checks. General portrait
+framing, manual anchor correction, wider (whole-project) candidate search,
 phrase/downbeat detection, whip pans, object wipes and speed ramps remain future work.

@@ -47,10 +47,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   settings, raw/prepared reuse, exact timeline duration, loudness/edge preparation,
   Listen/Stop and one native undoable import/insertion. The Goa music export keeps
   all 474 decoded visual frames unchanged and measures -18.1 LUFS / -5.0 dBFS.
-- Local **Align cuts** proposes bounded shifts to existing music energy accents.
+- Local **Align cuts** proposes bounded shifts to estimated beats in existing music,
+  with explicit energy-accent fallback.
   It preserves shot order, source starts, clip IDs, music and total span; reviewed
   changes use native resize/move operations and one Undo. Complex timelines are
-  ineligible. Accents are not verified beats or phrases.
+  ineligible. Estimates do not identify downbeats or phrases.
 - **Add sound** generates one explicitly described ElevenLabs sound effect at the
   playhead, with bounded duration, private raw/prepared reuse, preview and native
   undoable audio insertion. Its **Suggest sounds** action reuses cached visual
@@ -63,12 +64,13 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   One revision preserves total frames and passes the original source/recipe
   checks; failed review remains explicitly unavailable, never approval.
 - **Match cut** proposes object alignment for two selected adjacent video-only
-  shots. Gemini selects one pair, native MLT/CSRT tracks boundary windows, and
-  bounded uniform Transform keyframes preserve timing. Comparison, one Undo,
+  shots. One Gemini call offers up to three pairs; at most two are tracked by
+  native MLT/CSRT and the lowest crop/motion cost wins.
+  Bounded uniform Transform keyframes preserve timing. Comparison, one Undo,
   caching, stale-result rejection and native rendered geometry are exercised.
   This is a selected-pair prototype; it does not search the entire bin.
 - Still pending: deferred portrait framing, additional native failure checks,
-  narration, audio pairing/ducking, beat-aligned cuts, word alignment,
+  narration, audio pairing/ducking, musical phrase detection, word alignment,
   and deeper travel recipe execution. Portrait footage remains pillarboxed;
   passing integration checks does not make it a finished travel film.
 - See [native integration](native-integration.md) for exact verification limits.
