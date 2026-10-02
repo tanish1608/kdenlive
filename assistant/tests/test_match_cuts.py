@@ -17,8 +17,13 @@ from montaz_assistant.contracts import Asset, FrameRate, OccupiedRange, Snapshot
 from montaz_assistant.gemini import AssistantError
 from montaz_assistant import match_cuts
 from montaz_assistant.match_cuts import (
+    CANDIDATE_SCHEMA,
     MODELS,
+    NO_FIT,
+    anchor_geometry,
     native_frames,
+    tracking_seeds,
+    zoom_limit,
     UNSUITABLE,
     align,
     box,
@@ -44,6 +49,10 @@ JPEG = base64.b64encode(b"\xff\xd8synthetic-fixture\xff\xd9").decode("ascii")
 
 class MatchCutsTests(unittest.TestCase):
     def setUp(self):
+        # Fixture files are not real media; resolution limits have their own tests.
+        limit = patch.object(match_cuts, "zoom_limit", return_value=2.0)
+        limit.start()
+        self.addCleanup(limit.stop)
         self.snapshot = Snapshot(
             "p",
             "s",
@@ -187,14 +196,8 @@ class MatchCutsTests(unittest.TestCase):
             for p in paths.values():
                 Path(p).write_bytes(b"fixture")
             provider = Mock(model="gemini-test")
-            provider.generate.return_value = dict(
-                reason="Two round objects",
-                candidates=[
-                    dict(
-                        reason="Round objects",
-                        boxes=[[0.3, 0.3, 0.2, 0.2], [0.4, 0.4, 0.2, 0.2]],
-                    )
-                ],
+            provider.generate.return_value = answer(
+                ([0.3, 0.3, 0.2, 0.2], [0.4, 0.4, 0.2, 0.2]), reason="Two round objects"
             )
 
             def native(*args):
@@ -265,7 +268,7 @@ class MatchCutsTests(unittest.TestCase):
                 self.assertEqual(review["status"], "no_match")
                 self.assertEqual(review["operations"], [])
 
-                def mutate(parts):
+                def mutate(parts, **_):
                     Path(paths["1"]).write_bytes(b"changed")
                     return dict(reason="No match", candidates=[])
 
@@ -313,14 +316,40 @@ SHAPES = ([0.30, 0.30, 0.10, 0.10], [0.30, 0.30, 0.40, 0.10])  # aspect mismatch
 ZOOM = ([0.30, 0.30, 0.10, 0.10], [0.30, 0.30, 0.30, 0.30])  # beyond 2x
 
 
-def answer(*pairs, reason="Candidate objects"):
+def native(b):
+    """Fractional [x, y, w, h] as Gemini's [ymin, xmin, ymax, xmax] on 0-1000."""
+    return [
+        round(b[1] * 1000),
+        round(b[0] * 1000),
+        round((b[1] + b[3]) * 1000),
+        round((b[0] + b[2]) * 1000),
+    ]
+
+
+def answer(*pairs, reason="Candidate objects", anchors=()):
+    """Provider answer for subject pairs; `anchors` apply to every pair."""
     return dict(
         reason=reason,
         candidates=[
-            dict(reason=f"Pair {i}", boxes=[list(a), list(b)])
+            dict(
+                reason=f"Pair {i}",
+                subject=[native(a), native(b)],
+                anchors=[
+                    dict(name=name, boxes=[native(x), native(y)])
+                    for name, x, y in anchors
+                ],
+            )
             for i, (a, b) in enumerate(pairs)
         ],
     )
+
+
+def raw_pair(outgoing, incoming=None, **changes):
+    """One provider candidate with literal (possibly invalid) native boxes."""
+    candidate = dict(
+        reason="r", subject=[outgoing, incoming or native(CENTERED[1])], anchors=[]
+    )
+    return dict(reason="r", candidates=[{**candidate, **changes}])
 
 
 class MatchCandidateTests(unittest.TestCase):
@@ -378,14 +407,19 @@ class MatchCandidateTests(unittest.TestCase):
 
     def test_strict_candidate_schema_rejects_malformed_answers(self):
         good = answer(CENTERED)
+        reason, found = parse_candidates(good)
         self.assertEqual(
-            parse_candidates(good)[1][0]["boxes"], list(map(list, CENTERED))
+            found, [dict(reason="Pair 0", boxes=list(map(list, CENTERED)), anchors=[])]
         )
         self.assertEqual(parse_candidates(answer())[1], [])
         self.assertEqual(parse_candidates(answer(reason="\ud800"))[0], "\ud800")
+        candidate = good["candidates"][0]
+        anchor = dict(name="badge", boxes=[native(CENTERED[0]), native(CENTERED[1])])
         bad = [
             None,
-            dict(reason="Old schema", boxes=list(CENTERED)),
+            dict(
+                reason="Old schema", candidates=[dict(reason="r", boxes=list(CENTERED))]
+            ),
             {**good, "extra": 1},
             dict(candidates=[]),
             dict(reason="  ", candidates=[]),
@@ -395,27 +429,86 @@ class MatchCandidateTests(unittest.TestCase):
             dict(reason="Not a list", candidates={}),
             answer(CENTERED, OFFSET, HIGH, SHAPES),
             dict(reason="r", candidates=["pair"]),
-            dict(reason="r", candidates=[dict(reason="r", boxes=[CENTERED[0]])]),
-            dict(reason="r", candidates=[dict(reason="", boxes=list(CENTERED))]),
-            dict(reason="r", candidates=[dict(reason="x" * 201, boxes=list(CENTERED))]),
-            dict(reason="r", candidates=[dict(boxes=list(CENTERED))]),
-            dict(reason="r", candidates=[{**good["candidates"][0], "score": 0.9}]),
+            dict(
+                reason="r",
+                candidates=[{k: v for k, v in candidate.items() if k != "anchors"}],
+            ),
+            dict(
+                reason="r",
+                candidates=[{**candidate, "subject": candidate["subject"][:1]}],
+            ),
+            dict(reason="r", candidates=[{**candidate, "reason": ""}]),
+            dict(reason="r", candidates=[{**candidate, "reason": "x" * 201}]),
+            dict(reason="r", candidates=[{**candidate, "score": 0.9}]),
+            dict(reason="r", candidates=[{**candidate, "anchors": [anchor] * 4}]),
+            dict(
+                reason="r",
+                candidates=[{**candidate, "anchors": [{**anchor, "name": ""}]}],
+            ),
+            dict(
+                reason="r", candidates=[{**candidate, "anchors": [{**anchor, "x": 1}]}]
+            ),
+            dict(
+                reason="r",
+                candidates=[
+                    {**candidate, "anchors": [{**anchor, "boxes": anchor["boxes"][:1]}]}
+                ],
+            ),
+            dict(
+                reason="r",
+                candidates=[
+                    {
+                        **candidate,
+                        "anchors": [
+                            {**anchor, "boxes": [[1, 2, 3], native(CENTERED[1])]}
+                        ],
+                    }
+                ],
+            ),
         ]
-        for value in (True, float("nan"), float("inf"), 10**400, "0.4", None):
-            bad.append(answer(([value, 0.4, 0.1, 0.1], CENTERED[1])))
-        bad.append(answer(([0.95, 0.4, 0.1, 0.1], CENTERED[1])))
-        bad.append(answer(([0.9000001, 0.4, 0.1, 0.1], CENTERED[1])))
+        for value in (True, float("nan"), float("inf"), 10**400, "400", None, 1001, -1):
+            bad.append(raw_pair([value, 450, 500, 550]))
+        bad.append(raw_pair([500, 450, 400, 550]))  # ymin after ymax
+        bad.append(raw_pair([400, 550, 500, 550]))  # zero width
+        bad.append(raw_pair([400, 450, 500]))
         for raw in bad:
             with self.subTest(raw=raw), self.assertRaises(AssistantError) as caught:
                 parse_candidates(raw)
             self.assertEqual(caught.exception.code, "invalid_match_evidence")
 
+    def test_subject_seeds_stay_inside_the_frame_for_tracking(self):
+        # A whole car front touching the top and right edges, as Gemini returned it.
+        (found,) = parse_candidates(raw_pair([0, 513, 955, 1000]))[1]
+        x, y, w, h = found["boxes"][0]
+        self.assertAlmostEqual(x, 0.513)
+        self.assertAlmostEqual(y, 0.02)
+        self.assertAlmostEqual(x + w, 0.98)
+        self.assertAlmostEqual(y + h, 0.955)
+        # An inset that leaves less than the tracker minimum drops the pair.
+        self.assertEqual(parse_candidates(raw_pair([0, 450, 50, 550]))[1], [])
+
+    def test_weak_answers_drop_parts_instead_of_failing(self):
+        # Subjects under the tracker minimum and null anchor boxes are not malformed.
+        tiny = raw_pair([400, 450, 430, 550])
+        self.assertEqual(parse_candidates(tiny)[1], [])
+        held = raw_pair(
+            native(CENTERED[0]),
+            anchors=[
+                dict(name="lost", boxes=[None, native(CENTERED[1])]),
+                dict(name="badge", boxes=[native(CENTERED[0]), native(CENTERED[1])]),
+            ],
+        )
+        (found,) = parse_candidates(held)[1]
+        self.assertEqual([a["name"] for a in found["anchors"]], ["badge"])
+
     def test_malformed_provider_output_is_terminal_before_tracking(self):
         for raw in (
-            dict(reason="Old schema", boxes=list(CENTERED)),
-            answer(([True, 0.4, 0.1, 0.1], CENTERED[1])),
-            answer(([float("nan"), 0.4, 0.1, 0.1], CENTERED[1])),
-            answer(([10**400, 0.4, 0.1, 0.1], CENTERED[1])),
+            dict(
+                reason="Old schema", candidates=[dict(reason="r", boxes=list(CENTERED))]
+            ),
+            raw_pair([True, 450, 500, 550]),
+            raw_pair([float("nan"), 450, 500, 550]),
+            raw_pair([10**400, 450, 500, 550]),
             answer(CENTERED, OFFSET, HIGH, SHAPES),
         ):
             self.provider.generate.return_value = raw
@@ -527,7 +620,8 @@ class MatchCandidateTests(unittest.TestCase):
         review = self.run_match()
         self.assertEqual(
             (review["status"], review["reason"], review["operations"]),
-            ("no_match", UNSUITABLE, []),
+            # Nothing was tracked, so the reason must not blame tracking.
+            ("no_match", NO_FIT, []),
         )
         self.assertEqual(self.tracker.call_count, 2)
         self.assertTrue(self.run_match()["cached"])
@@ -1024,11 +1118,11 @@ class MatchStabilityTests(unittest.TestCase):
         real = match_cuts._solve
         calls = []
 
-        def solve(boxes):
+        def solve(boxes, *args):
             calls.append(boxes)
             if len(calls) == 2:
                 raise AssistantError("no_match")
-            return real(boxes)
+            return real(boxes, *args)
 
         used = []
         with patch("montaz_assistant.match_cuts._solve", side_effect=solve):
@@ -1085,7 +1179,273 @@ class MatchStabilityPipelineTests(unittest.TestCase):
         self.provider.generate.return_value = answer(CENTERED)
         self.run_match()
         self.assertTrue(self.run_match()["cached"])
-        with patch.object(match_cuts, "VERSION", "object-match-4"):
+        with patch.object(match_cuts, "VERSION", "object-match-5"):
             self.assertFalse(self.run_match()["cached"])
-        self.assertEqual(match_cuts.VERSION, "object-match-5")
+        self.assertEqual(match_cuts.VERSION, "object-match-6")
         self.assertEqual(self.provider.generate.call_count, 2)
+
+
+# Two car fronts: different subject boxes, headlights 0.40 and 0.36 apart.
+CAR_OUT = [0.20, 0.40, 0.60, 0.40]
+CAR_IN = [0.25, 0.30, 0.50, 0.45]
+CAR_SAME = [0.20, 0.30, 0.60, 0.40]
+LIGHTS = (
+    ("left headlight", [0.29, 0.59, 0.02, 0.02], [0.31, 0.49, 0.02, 0.02]),
+    ("right headlight", [0.69, 0.59, 0.02, 0.02], [0.67, 0.49, 0.02, 0.02]),
+)
+
+
+def lights(side, frame_box, seed_box):
+    """Headlight centres that move and scale rigidly with a tracked subject box."""
+    points = []
+    for _, *boxes in LIGHTS:
+        b = boxes[side]
+        cx, cy = b[0] + b[2] / 2, b[1] + b[3] / 2
+        sx, sy = seed_box[0] + seed_box[2] / 2, seed_box[1] + seed_box[3] / 2
+        k = frame_box[3] / seed_box[3]
+        fx, fy = frame_box[0] + frame_box[2] / 2, frame_box[1] + frame_box[3] / 2
+        points.append((fx + (cx - sx) * k, fy + (cy - sy) * k))
+    return points
+
+
+def candidate(anchors=LIGHTS, out=CAR_OUT, inc=CAR_IN):
+    return dict(
+        reason="Car fronts",
+        boxes=[out, inc],
+        anchors=[dict(name=n, boxes=[a, b]) for n, a, b in anchors],
+    )
+
+
+class MatchAnchorTests(unittest.TestCase):
+    """Landmark (anchor) alignment and resolution-aware zoom limits."""
+
+    def shown(self, transforms, tracks, seeds):
+        """Canvas positions of both headlights on every keyframe of both clips."""
+        return [
+            [
+                [
+                    (k["x"] + k["scale"] * x, k["y"] + k["scale"] * y)
+                    for x, y in lights(side, b, seed)
+                ]
+                for k, b in zip(values, boxes)
+            ]
+            for side, (values, boxes, seed) in enumerate(zip(transforms, tracks, seeds))
+        ]
+
+    def test_geometry_describes_anchors_relative_to_the_subject(self):
+        geometry, note = anchor_geometry(candidate(), 16 / 9)
+        self.assertEqual(note, "anchors-2")
+        (dx, dy, ratio), _ = geometry
+        # Outgoing centroid (0.5, 0.6) vs subject centre (0.5, 0.6); spread 0.2 * 16/9.
+        self.assertAlmostEqual(dx, 0)
+        self.assertAlmostEqual(dy, 0)
+        self.assertAlmostEqual(ratio, 0.2 * 16 / 9 / 0.40)
+        single, note = anchor_geometry(candidate(LIGHTS[:1]), 16 / 9)
+        self.assertEqual((note, single[0][2]), ("anchors-1", 1.0))
+        self.assertEqual(anchor_geometry(candidate(()), 16 / 9), (None, "subject"))
+        mirrored = (
+            ("left", LIGHTS[0][1], LIGHTS[1][2]),
+            ("right", LIGHTS[1][1], LIGHTS[0][2]),
+        )
+        self.assertEqual(
+            anchor_geometry(candidate(mirrored), 16 / 9), (None, "anchors-mirrored")
+        )
+        outside = (("tree", [0.01, 0.01, 0.02, 0.02], [0.01, 0.01, 0.02, 0.02]),)
+        self.assertEqual(
+            anchor_geometry(candidate(outside), 16 / 9), (None, "anchors-outside")
+        )
+        close = (
+            LIGHTS[0],
+            ("near", [0.292, 0.591, 0.02, 0.02], [0.312, 0.491, 0.02, 0.02]),
+        )
+        self.assertEqual(
+            anchor_geometry(candidate(close), 16 / 9), (None, "anchors-degenerate")
+        )
+
+    def test_anchor_alignment_matches_landmarks_where_subject_boxes_disagree(self):
+        # Same-shaped subject boxes, but headlights 0.40 vs 0.36 apart.
+        for incoming, subject_only in ((CAR_IN, "no_match"), (CAR_SAME, "mismatch")):
+            tracks, seeds = [[CAR_OUT] * 30, [incoming] * 30], [CAR_OUT, incoming]
+            geometry, _ = anchor_geometry(candidate(inc=incoming), 16 / 9)
+            out, inc = self.shown(align(tracks, anchors=geometry)[1], tracks, seeds)
+            last, first = out[-1], inc[0]
+            for a, b in zip(last, first):
+                self.assertAlmostEqual(a[0], b[0], delta=0.002)
+                self.assertAlmostEqual(a[1], b[1], delta=0.002)
+            self.assertAlmostEqual(math.dist(*last), math.dist(*first), delta=0.002)
+            if subject_only == "no_match":
+                # Dissimilar boxes keep the existing shape gate without anchors.
+                with self.assertRaises(AssistantError):
+                    align(tracks)
+            else:
+                out, inc = self.shown(align(tracks)[1], tracks, seeds)
+                # Matching box heights leaves the headlight spans 10% apart.
+                self.assertGreater(
+                    abs(math.dist(*out[-1]) / math.dist(*inc[0]) - 1), 0.08
+                )
+
+    def test_anchors_follow_the_tracked_subject_through_motion_and_zoom(self):
+        moving = [
+            [0.20 + 0.002 * i, 0.40, 0.60 * (1 + 0.003 * i), 0.40 * (1 + 0.003 * i)]
+            for i in range(30)
+        ]
+        tracks = [moving, [CAR_IN] * 30]
+        geometry, _ = anchor_geometry(candidate(), 16 / 9)
+        target, transforms = align(tracks, model="baseline", anchors=geometry)
+        out, inc = self.shown(transforms, tracks, [CAR_OUT, CAR_IN])
+        for frame in out + inc:
+            centroid = (
+                (frame[0][0] + frame[1][0]) / 2,
+                (frame[0][1] + frame[1][1]) / 2,
+            )
+            self.assertAlmostEqual(centroid[0], target["x"], delta=0.002)
+            self.assertAlmostEqual(centroid[1], target["y"], delta=0.002)
+
+    def test_anchored_pairs_track_an_edge_safe_core_of_the_subject(self):
+        # A whole wheel touching the top and right edges, with anchors on its hub.
+        wheel = [0.53, 0.02, 0.45, 0.94]
+        hub = ("hub", [0.72, 0.45, 0.05, 0.08], [0.72, 0.45, 0.05, 0.08])
+        top = ("rim top", [0.73, 0.05, 0.03, 0.03], [0.73, 0.05, 0.03, 0.03])
+        anchored = candidate((hub, top), out=wheel, inc=wheel)
+        for seed, subject in zip(tracking_seeds(anchored, 16 / 9), anchored["boxes"]):
+            self.assertAlmostEqual(seed[2], subject[2] * 0.6)
+            self.assertAlmostEqual(seed[3], subject[3] * 0.6)
+            self.assertGreaterEqual(min(seed[0], seed[1]), 0.02)
+            self.assertLessEqual(max(seed[0] + seed[2], seed[1] + seed[3]), 0.98 + 1e-9)
+        plain = candidate((), out=wheel, inc=wheel)
+        self.assertEqual(tracking_seeds(plain, 16 / 9), plain["boxes"])
+
+    def test_zoom_limits_follow_source_resolution(self):
+        spec = dict(width=1920, height=1080)
+        for size, expected in (
+            ((1920, 1080), 1.6),
+            ((3840, 2160), 2.0),
+            ((1280, 720), 1.1),
+            (
+                (1080, 1920),
+                2.0,
+            ),  # Fitted portrait: 1.78 source pixels per canvas pixel.
+        ):
+            media = MediaTools()
+            payload = json.dumps(
+                dict(streams=[dict(width=size[0], height=size[1])])
+            ).encode()
+            with patch.object(media, "_output", return_value=payload):
+                self.assertAlmostEqual(
+                    zoom_limit(Path("/x.mp4"), spec, media), expected
+                )
+        for payload in (
+            b"{}",
+            b'{"streams":[]}',
+            b'{"streams":[{"width":true,"height":1}]}',
+        ):
+            media = MediaTools()
+            with (
+                patch.object(media, "_output", return_value=payload),
+                self.assertRaises(AssistantError) as caught,
+            ):
+                zoom_limit(Path("/x.mp4"), spec, media)
+            self.assertEqual(caught.exception.code, "media_unreadable")
+        media = MediaTools()
+        media.cancel()
+        with self.assertRaises(AssistantError) as caught:
+            zoom_limit(Path("/x.mp4"), spec, media)
+        self.assertEqual(caught.exception.code, "cancelled")
+
+    def test_zoom_limits_reject_alignments_that_would_upscale_too_far(self):
+        # Matching these heights needs about 1.9x on the smaller subject.
+        tracks = [[[0.4, 0.4, 0.1, 0.1]] * 10, [[0.35, 0.35, 0.19, 0.19]] * 10]
+        target, transforms = align(tracks, limits=(2.0, 2.0))
+        self.assertGreater(max(k["scale"] for v in transforms for k in v), 1.6)
+        with self.assertRaises(AssistantError) as caught:
+            align(tracks, limits=(1.6, 1.6))
+        self.assertEqual(caught.exception.code, "no_match")
+
+
+class MatchAnchorPipelineTests(unittest.TestCase):
+    """Anchors inside the bounded candidate pipeline."""
+
+    setUp = MatchCandidateTests.setUp
+    run_match = MatchCandidateTests.run_match
+    native = MatchCandidateTests.native
+
+    def test_provider_is_constrained_and_anchors_drive_the_review(self):
+        self.provider.generate.return_value = answer((CAR_OUT, CAR_IN), anchors=LIGHTS)
+        report = {}
+        review = self.run_match(report=report)
+        self.assertEqual(
+            self.provider.generate.call_args.kwargs, dict(schema=CANDIDATE_SCHEMA)
+        )
+        self.assertEqual(review["status"], "matched")
+        self.assertIn("Lined up on left headlight, right headlight.", review["reason"])
+        self.assertLessEqual(len(review["reason"]), 600)
+        self.assertEqual(report["tracked"][0]["anchors"], "anchors-2")
+        # Headlights coincide across the cut in the proposed keyframes.
+        out, inc = (o["keyframes"] for o in review["operations"])
+        k_out, k_in = out[-1], inc[0]
+        for _, a, b in LIGHTS:
+            pa = (
+                k_out["x"] + k_out["scale"] * (a[0] + a[2] / 2),
+                k_out["y"] + k_out["scale"] * (a[1] + a[3] / 2),
+            )
+            pb = (
+                k_in["x"] + k_in["scale"] * (b[0] + b[2] / 2),
+                k_in["y"] + k_in["scale"] * (b[1] + b[3] / 2),
+            )
+            self.assertAlmostEqual(pa[0], pb[0], delta=0.003)
+            self.assertAlmostEqual(pa[1], pb[1], delta=0.003)
+        again = self.run_match(revision=7)
+        self.assertTrue(again["cached"])
+        self.assertEqual(again["operations"], review["operations"])
+        self.assertEqual(self.provider.generate.call_count, 1)
+
+    def test_mirrored_anchors_fall_back_to_subject_alignment(self):
+        mirrored = (
+            ("left", LIGHTS[0][1], LIGHTS[1][2]),
+            ("right", LIGHTS[1][1], LIGHTS[0][2]),
+        )
+        self.provider.generate.return_value = answer(
+            (CAR_OUT, CAR_SAME), anchors=mirrored
+        )
+        report = {}
+        review = self.run_match(report=report)
+        self.assertEqual(review["status"], "matched")
+        self.assertEqual(report["tracked"][0]["anchors"], "anchors-mirrored")
+        self.assertNotIn("Lined up on", review["reason"])
+        # Box-only fallback keeps the shape gate for dissimilar subject boxes.
+        self.provider.generate.return_value = answer(
+            (CAR_OUT, CAR_IN), anchors=mirrored
+        )
+        self.cache = self.root / "other"
+        self.assertEqual(self.run_match()["status"], "no_match")
+
+    def test_anchors_are_calibrated_to_the_trackers_own_box(self):
+        # CSRT reports the seed on frame 0, then its own, 15% smaller box around
+        # the same still car. The real headlights never move.
+        def shrinking(path, start, length, spec, rate, media, seed=None):
+            if seed is None:
+                return dict(first=JPEG, last=JPEG, boxes=[])
+            cx, cy = seed[0] + seed[2] / 2, seed[1] + seed[3] / 2
+            w, h = seed[2] * 0.85, seed[3] * 0.85
+            own = [cx - w / 2, cy - h / 2, w, h]
+            return dict(boxes=[list(seed)] + [own] * (length - 1))
+
+        self.tracker.side_effect = shrinking
+        self.provider.generate.return_value = answer((CAR_OUT, CAR_IN), anchors=LIGHTS)
+        review = self.run_match()
+        self.assertEqual(review["status"], "matched")
+        out, inc = (o["keyframes"] for o in review["operations"])
+        for k_out, k_in in ((out[-1], inc[0]), (out[0], inc[-1])):
+            for _, a, b in LIGHTS:
+                pa = (
+                    k_out["x"] + k_out["scale"] * (a[0] + a[2] / 2),
+                    k_out["y"] + k_out["scale"] * (a[1] + a[3] / 2),
+                )
+                pb = (
+                    k_in["x"] + k_in["scale"] * (b[0] + b[2] / 2),
+                    k_in["y"] + k_in["scale"] * (b[1] + b[3] / 2),
+                )
+                self.assertAlmostEqual(pa[0], pb[0], delta=0.003)
+                self.assertAlmostEqual(pa[1], pb[1], delta=0.003)
+        # The seed frame takes the tracker's box: no 15% zoom step on frame 1.
+        self.assertAlmostEqual(out[0]["scale"], out[1]["scale"])

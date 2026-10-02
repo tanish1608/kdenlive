@@ -18,9 +18,19 @@ from .planning import MediaChildError, MediaTools
 from .match_stability import fit_centers, fit_heights, stability, triangle
 from .protocol import decode, fields, frame
 
-VERSION = "object-match-5"
+VERSION = "object-match-6"
 MODELS = ("baseline", "triangle9", "size-fit", "stable")
 MAX_CANDIDATES = 3
+MAX_ANCHORS = 3
+# Uniform zoom may upscale source pixels at most this much (1080p on a 1080p
+# canvas: 1.6x; 4K: the native 2x ceiling). Low-resolution sources keep 1.1x.
+MAX_UPSCALE, MIN_ZOOM_LIMIT = 1.6, 1.1
+# Anchors may lie this fraction of the subject size outside its box; a smaller
+# spread (canvas heights) cannot fix scale; a larger turn means mirrored labels.
+ANCHOR_MARGIN, MIN_ANCHOR_SPREAD, MAX_ANCHOR_TURN = 0.15, 0.02, math.radians(30)
+EDGE_INSET = 0.02
+# Anchored pairs track this central fraction of the subject box.
+TRACK_CORE = 0.6
 MAX_TRACKED = 2
 # WorkerClient kills a match run 90 s after sending it. Keep 10 s for interpreter
 # start-up and the final message. A further candidate starts only when both of
@@ -33,6 +43,55 @@ DUPLICATE_OVERLAP = 0.5
 # discarding a further ten percent of the source picture.
 MOTION_WEIGHT = 10.0
 UNSUITABLE = "The alignment needs excessive cropping or the object track is unstable."
+NO_FIT = "No suggested pair fits within the zoom and full-frame limits."
+# Gemini's native detection format: [ymin, xmin, ymax, xmax] integers on 0-1000.
+_BOX_2D = {"type": "ARRAY", "items": {"type": "INTEGER"}, "minItems": 4, "maxItems": 4}
+_PAIR = {"type": "ARRAY", "items": _BOX_2D, "minItems": 2, "maxItems": 2}
+CANDIDATE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "reason": {"type": "STRING"},
+        "candidates": {
+            "type": "ARRAY",
+            "maxItems": MAX_CANDIDATES,
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "reason": {"type": "STRING"},
+                    "subject": _PAIR,
+                    "anchors": {
+                        "type": "ARRAY",
+                        "maxItems": MAX_ANCHORS,
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {"name": {"type": "STRING"}, "boxes": _PAIR},
+                            "required": ["name", "boxes"],
+                        },
+                    },
+                },
+                "required": ["reason", "subject", "anchors"],
+            },
+        },
+    },
+    "required": ["reason", "candidates"],
+}
+PROMPT = (
+    "Find up to THREE graphic-match pairs between these two images (first = outgoing "
+    "shot, second = incoming shot). A pair is the same kind of subject in both images "
+    "that an editor could line up across a cut, for example the fronts of two cars, two "
+    "wheels or two faces. The subjects may differ in identity. For each pair give: "
+    "subject = the box of the WHOLE subject in each image, the thing whose size and "
+    "position should match across the cut; anchors = up to three small distinct "
+    "landmarks visible on that subject in BOTH images (for example left headlight, "
+    "right headlight and badge, or the wheel hub), in the same order for both images, "
+    "where left and right mean image-left and image-right. Prefer two or three anchors "
+    "far apart on the subject. Every box is [ymin, xmin, ymax, xmax] in integers from 0 "
+    "to 1000 relative to the whole image, including any black bars. Subject boxes must "
+    "be at least 40 wide and 40 high. Choose distinctive textured subjects, not sky, "
+    "water or plain background. Each pair must use a different subject. If no "
+    "convincing pair exists, return an empty candidates list with a short reason. "
+    "Fewer strong pairs are better than weak ones. Do not invent objects or force a match."
+)
 CLIP_FIELDS = {
     "instance_id",
     "bin_id",
@@ -143,10 +202,121 @@ def _model(boxes: list[list[float]], name: str, used: list[str]) -> list[list[fl
     ]
 
 
+def _center(b: list[float]) -> tuple[float, float]:
+    return b[0] + b[2] / 2, b[1] + b[3] / 2
+
+
+def _inside(point: tuple[float, float], s: list[float]) -> bool:
+    margin_x, margin_y = s[2] * ANCHOR_MARGIN, s[3] * ANCHOR_MARGIN
+    return (
+        s[0] - margin_x <= point[0] <= s[0] + s[2] + margin_x
+        and s[1] - margin_y <= point[1] <= s[1] + s[3] + margin_y
+    )
+
+
+def kept_anchors(candidate: dict) -> list[dict]:
+    """Anchors whose centres lie in (or just outside) the subject on both sides."""
+    return [
+        a
+        for a in candidate["anchors"]
+        if all(_inside(_center(b), s) for b, s in zip(a["boxes"], candidate["boxes"]))
+    ]
+
+
+def tracking_seeds(candidate: dict, aspect: float) -> list[list[float]]:
+    """What the helper tracks. With usable anchors the tracked box only carries
+    motion, so track the subject's textured core, away from the frame edges that
+    whole-subject boxes often touch. Without anchors, track the subject itself."""
+    if anchor_geometry(candidate, aspect)[0] is None:
+        return candidate["boxes"]
+    seeds = []
+    for b in candidate["boxes"]:
+        w, h = max(0.04, b[2] * TRACK_CORE), max(0.04, b[3] * TRACK_CORE)
+        cx, cy = _center(b)
+        x = min(max(cx - w / 2, EDGE_INSET), 1 - EDGE_INSET - w)
+        y = min(max(cy - h / 2, EDGE_INSET), 1 - EDGE_INSET - h)
+        seeds.append([x, y, w, h])
+    return seeds
+
+
+def calibrated(tracks: list[list[list[float]]]) -> tuple[list | None, list]:
+    """The tracker's own box per side, and tracks whose seed frame uses it.
+
+    The helper reports the provider's seed on the first frame and its own box
+    size convention afterwards (large seeds shrink by 10-20% on frame 1). Anchors
+    measured on the seed image are expressed relative to the first tracked box,
+    which also replaces the seed frame. One frame of motion is the accepted error.
+    """
+    if any(len(t) < 2 for t in tracks):
+        return None, tracks
+    return [t[1] for t in tracks], [[t[1], *t[1:]] for t in tracks]
+
+
+def anchor_geometry(
+    candidate: dict, aspect: float, reference: list[list[float]] | None = None
+) -> tuple[list[tuple[float, float, float]] | None, str]:
+    """Where the anchors sit relative to each side's subject box.
+
+    Returns per side (dx, dy, ratio): the anchor centroid minus the subject center
+    in subject heights, and the anchor size in subject heights (the RMS spread of
+    two or more anchors, or the subject itself for one anchor). Anchors move and
+    scale with the tracked box: `reference` (the tracker's own box per side)
+    when given, otherwise the subject. None keeps subject-box alignment: no
+    anchors, anchors outside the subject, a degenerate spread, or a left/right
+    order that turns by more than 30 degrees between the images.
+    """
+    subjects = reference or candidate["boxes"]
+    kept = kept_anchors(candidate)
+    if not kept:
+        return None, "anchors-outside" if candidate["anchors"] else "subject"
+    sides, turns = [], []
+    for side, s in enumerate(subjects):
+        points = [_center(a["boxes"][side]) for a in kept]
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+        ratio = 1.0
+        if len(points) > 1:
+            # Isotropic canvas units: x distances count in canvas heights too.
+            spread = math.sqrt(
+                sum(((p[0] - cx) * aspect) ** 2 + (p[1] - cy) ** 2 for p in points)
+                / len(points)
+            )
+            if spread < MIN_ANCHOR_SPREAD:
+                return None, "anchors-degenerate"
+            ratio = spread / s[3]
+            turns.append(
+                math.atan2(
+                    points[1][1] - points[0][1], (points[1][0] - points[0][0]) * aspect
+                )
+            )
+        sx, sy = _center(s)
+        sides.append(((cx - sx) / s[3], (cy - sy) / s[3], ratio))
+    if turns:
+        turn = (turns[1] - turns[0] + math.pi) % (2 * math.pi) - math.pi
+        if abs(turn) > MAX_ANCHOR_TURN:
+            return None, "anchors-mirrored"
+    return sides, f"anchors-{len(kept)}"
+
+
+def _anchored(
+    boxes: list[list[float]], geometry: tuple[float, float, float]
+) -> list[list[float]]:
+    """Square stand-in boxes centered on the anchors, sized by their spread."""
+    dx, dy, ratio = geometry
+    result = []
+    for b in boxes:
+        cx, cy = _center(b)
+        cx, cy, size = cx + dx * b[3], cy + dy * b[3], ratio * b[3]
+        result.append([cx - size / 2, cy - size / 2, size, size])
+    return result
+
+
 def align(
     tracks: list[list[list[float]]],
     model: str = "stable",
     used: list[str] | None = None,
+    anchors: list[tuple[float, float, float]] | None = None,
+    limits: tuple[float, float] = (2.0, 2.0),
 ) -> tuple[dict, list[list[dict]]]:
     """Keep subject height/center constant with aspect-preserving crops, capped at 2x.
 
@@ -157,6 +327,10 @@ def align(
     The baseline is always solved first, so every model accepts exactly the
     evidence the baseline accepts; if a model's own boxes fail a zoom, step or
     coverage gate, the baseline result is returned instead of a forced fit.
+
+    `anchors` (from anchor_geometry) aligns the anchor centroid and spread instead
+    of the subject box center and height; tracking and every gate still use the
+    subject box. `limits` caps each clip's zoom (at most the native 2x).
     """
     if model not in MODELS:
         raise AssistantError("invalid_match_evidence")
@@ -176,14 +350,25 @@ def align(
                 raise AssistantError("tracking_unavailable")
         smoothed.append(_model(boxes, "baseline", []))
     # Shape compatibility is judged on the baseline estimate for every model.
+    # Anchored pairs are matched by landmark order and spread instead: a car box
+    # may include the windscreen in one shot and not the other.
     ratios = [b[2] / b[3] for boxes in smoothed for b in boxes]
-    if max(ratios) / min(ratios) > 1.3:
+    if anchors is None and max(ratios) / min(ratios) > 1.3:
         raise AssistantError("no_match")
-    result = _solve(smoothed)
+
+    def frame(subjects):
+        if anchors is None:
+            return subjects
+        return [_anchored(b, g) for b, g in zip(subjects, anchors)]
+
+    clamp = anchors is None
+    result = _solve(frame(smoothed), limits, clamp)
     if model == "baseline":
         return result
     try:
-        return _solve([_model(boxes, model, used) for boxes in tracks])
+        return _solve(
+            frame([_model(boxes, model, used) for boxes in tracks]), limits, clamp
+        )
     except AssistantError as exc:
         if exc.code not in {"no_match", "tracking_unavailable"}:
             raise
@@ -191,11 +376,23 @@ def align(
         return result
 
 
-def _solve(tracks: list[list[list[float]]]) -> tuple[dict, list[list[dict]]]:
-    """Uniform scale/offset per frame for already modelled subject boxes."""
+def _solve(
+    tracks: list[list[list[float]]],
+    limits: tuple[float, float] = (2.0, 2.0),
+    clamp: bool = True,
+) -> tuple[dict, list[list[dict]]]:
+    """Uniform scale/offset per frame for already modelled subject boxes.
+
+    A subject box cannot outgrow the canvas (`clamp`); anchor spreads can.
+    """
     all_boxes = [b for boxes in tracks for b in boxes]
     minimum = max(b[3] for b in all_boxes) * 1.03
-    maximum = min(1.0, min(b[3] for b in all_boxes) * 2)
+    maximum = min(
+        min(b[3] for b in boxes) * min(limit, 2.0)
+        for boxes, limit in zip(tracks, limits)
+    )
+    if clamp:
+        maximum = min(1.0, maximum)
     if minimum > maximum:
         raise AssistantError("no_match")
     for attempt in range(25):
@@ -261,8 +458,65 @@ def _jpeg(value: object) -> bool:
     )
 
 
+def _region(raw: object) -> list[float]:
+    """A fractional [x, y, w, h] region inside the image with a non-zero size."""
+    if (
+        type(raw) is not list
+        or len(raw) != 4
+        or any(type(v) not in (int, float) or not 0 <= v <= 1 for v in raw)
+        or raw[2] <= 0
+        or raw[3] <= 0
+        or raw[0] + raw[2] > 1
+        or raw[1] + raw[3] > 1
+    ):
+        raise AssistantError("invalid_match_evidence")
+    return list(raw)
+
+
+def _box_2d(raw: object) -> list[float]:
+    """Gemini [ymin, xmin, ymax, xmax] on 0-1000 to a fractional [x, y, w, h]."""
+    # Range checks also reject NaN, infinities and huge integers without overflow.
+    if (
+        type(raw) is not list
+        or len(raw) != 4
+        or any(type(v) not in (int, float) or not 0 <= v <= 1000 for v in raw)
+        or raw[0] >= raw[2]
+        or raw[1] >= raw[3]
+    ):
+        raise AssistantError("invalid_match_evidence")
+    ymin, xmin, ymax, xmax = raw
+    # Subtract before dividing so integer coordinates convert exactly.
+    return [xmin / 1000, ymin / 1000, (xmax - xmin) / 1000, (ymax - ymin) / 1000]
+
+
+def _inset(b: list[float]) -> list[float]:
+    """Keep a tracking seed EDGE_INSET inside the frame.
+
+    Whole-subject boxes often touch the image edge; the helper rejects any
+    tracked box that steps outside the frame, which then fails the whole pair.
+    """
+    result = list(b)
+    for axis in (0, 1):
+        start, end = b[axis], b[axis] + b[axis + 2]
+        if start < EDGE_INSET or end > 1 - EDGE_INSET:
+            # Only clipped axes are recomputed; others keep their exact values.
+            start, end = max(start, EDGE_INSET), min(end, 1 - EDGE_INSET)
+            result[axis], result[axis + 2] = start, max(0.0, end - start)
+    return result
+
+
+def _subject_fits(boxes: list[list[float]]) -> bool:
+    # The native helper tracks subjects of at least 0.04 of the frame each way.
+    return all(b[2] >= 0.04 and b[3] >= 0.04 for b in boxes)
+
+
 def parse_candidates(raw: object) -> tuple[str, list[dict]]:
-    """Strict provider answer: an overall reason and at most three seed pairs."""
+    """Strict provider answer in Gemini's native box format.
+
+    Structure, types, ranges and lengths are validated; violations are terminal.
+    Semantically weak parts are dropped instead: subjects under the tracker's
+    minimum size, and anchors whose boxes are null.
+    """
     if (
         type(raw) is not dict
         or set(raw) != {"reason", "candidates"}
@@ -275,19 +529,65 @@ def parse_candidates(raw: object) -> tuple[str, list[dict]]:
     for c in raw["candidates"]:
         if (
             type(c) is not dict
-            or set(c) != {"reason", "boxes"}
+            or set(c) != {"reason", "subject", "anchors"}
+            or not _text(c["reason"], 200)
+            or type(c["subject"]) is not list
+            or len(c["subject"]) != 2
+            or type(c["anchors"]) is not list
+            or len(c["anchors"]) > MAX_ANCHORS
+        ):
+            raise AssistantError("invalid_match_evidence")
+        subject = [_inset(_box_2d(b)) for b in c["subject"]]
+        anchors = []
+        for a in c["anchors"]:
+            if (
+                type(a) is not dict
+                or set(a) != {"name", "boxes"}
+                or not _text(a["name"], 60)
+                or type(a["boxes"]) is not list
+                or len(a["boxes"]) != 2
+            ):
+                raise AssistantError("invalid_match_evidence")
+            if any(b is None for b in a["boxes"]):
+                continue
+            anchors.append(dict(name=a["name"], boxes=[_box_2d(b) for b in a["boxes"]]))
+        if _subject_fits(subject):
+            found.append(dict(reason=c["reason"], boxes=subject, anchors=anchors))
+    return raw["reason"], found
+
+
+def stored_candidates(raw: object) -> list[dict]:
+    """Revalidate parse_candidates() output read back from the match cache."""
+    if type(raw) is not list or len(raw) > MAX_CANDIDATES:
+        raise AssistantError("invalid_match_evidence")
+    found = []
+    for c in raw:
+        if (
+            type(c) is not dict
+            or set(c) != {"reason", "boxes", "anchors"}
             or not _text(c["reason"], 200)
             or type(c["boxes"]) is not list
             or len(c["boxes"]) != 2
+            or type(c["anchors"]) is not list
+            or len(c["anchors"]) > MAX_ANCHORS
         ):
             raise AssistantError("invalid_match_evidence")
-        boxes = [list(box(b)) for b in c["boxes"]]
-        # Seed requests use the helper's exact [0, 1] bounds. Track results retain
-        # box()'s tiny allowance for pixel-normalization rounding.
-        if any(b[0] + b[2] > 1 or b[1] + b[3] > 1 for b in boxes):
+        boxes = [_region(b) for b in c["boxes"]]
+        anchors = []
+        for a in c["anchors"]:
+            if (
+                type(a) is not dict
+                or set(a) != {"name", "boxes"}
+                or not _text(a["name"], 60)
+                or type(a["boxes"]) is not list
+                or len(a["boxes"]) != 2
+            ):
+                raise AssistantError("invalid_match_evidence")
+            anchors.append(dict(name=a["name"], boxes=[_region(b) for b in a["boxes"]]))
+        if not _subject_fits(boxes):
             raise AssistantError("invalid_match_evidence")
-        found.append(dict(reason=c["reason"], boxes=boxes))
-    return raw["reason"], found
+        found.append(dict(reason=c["reason"], boxes=boxes, anchors=anchors))
+    return found
 
 
 def _overlap(a: list[float], b: list[float]) -> float:
@@ -330,18 +630,26 @@ def metrics(transforms: list[list[dict]]) -> dict:
     )
 
 
-def rank(found: list[dict]) -> list[int]:
+def rank(
+    found: list[dict],
+    aspect: float = 16 / 9,
+    limits: tuple[float, float] = (2.0, 2.0),
+) -> list[int]:
     """Indices of unique seed pairs that pass the alignment gates, best first.
 
     Order: least seed crop, then closest box aspect ratios, then the larger
     smaller subject, then provider order. A pair overlapping an earlier pair on
-    both sides is a duplicate and is dropped.
+    both sides is a duplicate and is dropped. Seeds align on their anchors.
     """
     scored = []
     for i, c in enumerate(found):
         outgoing, incoming = c["boxes"]
         try:
-            _, transforms = align([[outgoing], [incoming]])
+            _, transforms = align(
+                [[outgoing], [incoming]],
+                anchors=anchor_geometry(c, aspect)[0],
+                limits=limits,
+            )
         except AssistantError as exc:
             if exc.code not in {"no_match", "tracking_unavailable"}:
                 raise
@@ -432,19 +740,58 @@ def native_frames(
     return result
 
 
-def _cached(entry: Path, windows: list[tuple[int, int]]) -> dict | None:
+def zoom_limit(path: Path, spec: dict, media: MediaTools) -> float:
+    """Largest uniform zoom that upscales this source's pixels at most MAX_UPSCALE.
+
+    Kdenlive fits the source inside the canvas, so source pixels per canvas pixel
+    are 1 / min(canvas_w / source_w, canvas_h / source_h).
+    """
+    try:
+        stream = decode(
+            media._output(
+                [
+                    os.environ.get("MONTAZ_FFPROBE", "ffprobe"),
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-of",
+                    "json",
+                    str(path),
+                ]
+            )
+        )["streams"][0]
+        width, height = stream["width"], stream["height"]
+        if type(width) is not int or type(height) is not int or width < 1 or height < 1:
+            raise AssistantError("media_unreadable")
+    except AssistantError:
+        raise
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise AssistantError("media_unreadable") from exc
+    density = 1 / min(spec["width"] / width, spec["height"] / height)
+    return max(MIN_ZOOM_LIMIT, min(2.0, MAX_UPSCALE * density))
+
+
+def _cached(
+    entry: Path,
+    windows: list[tuple[int, int]],
+    aspect: float,
+    limits: tuple[float, float],
+) -> dict | None:
     """Complete evidence only. Unreadable or inconsistent entries are a miss."""
     try:
         evidence = fields(
             decode(entry.read_bytes()), {"reason", "candidates", "tracked", "preview"}
         )
-        _, found = parse_candidates(
-            dict(reason=evidence["reason"], candidates=evidence["candidates"])
-        )
+        if not _text(evidence["reason"], 600):
+            return None
+        found = stored_candidates(evidence["candidates"])
         tracked, preview = evidence["tracked"], evidence["preview"]
         if (
             type(tracked) is not list
-            or len(tracked) != min(MAX_TRACKED, len(rank(found)))
+            or len(tracked) != min(MAX_TRACKED, len(rank(found, aspect, limits)))
             or (tracked and all(t is None for t in tracked))
             or any(
                 t is not None
@@ -486,9 +833,11 @@ def propose_match(
 ) -> dict:
     """One Gemini request for up to three seed pairs; at most two are tracked.
 
-    The selected pair is the tracked pair with the lowest metrics() cost that
-    passes align(); ties keep the earlier rank() position. `report`, when given,
-    receives local selection diagnostics that never enter the wire review.
+    Each pair is a tracked subject plus up to three anchors that set its aligned
+    position and size. The selected pair is the tracked pair with the lowest
+    metrics() cost that passes align(); ties keep the earlier rank() position.
+    `report`, when given, receives local selection diagnostics that never enter
+    the wire review.
     """
     started = clock()
     spec = match_spec(snapshot, raw)
@@ -503,6 +852,8 @@ def propose_match(
     paths = {bid: Path(p) for bid, p in sources.items()}
     hashes = {bid: _digest(p, media) for bid, p in paths.items()}
     windows = [window(c, i, rate) for i, c in enumerate(clips)]
+    aspect = spec["width"] / spec["height"]
+    limits = tuple(zoom_limit(paths[c["bin_id"]], spec, media) for c in clips)
     identity = [
         VERSION,
         provider.model,
@@ -519,7 +870,7 @@ def propose_match(
     entry = cache / (
         hashlib.sha256(json.dumps(identity).encode()).hexdigest() + ".json"
     )
-    evidence = _cached(entry, windows)
+    evidence = _cached(entry, windows, aspect, limits)
     cached, complete = evidence is not None, True
     progress("finding", cached)
     if evidence is None:
@@ -543,29 +894,18 @@ def propose_match(
         reason, found = parse_candidates(
             provider.generate(
                 [
-                    {
-                        "text": "Find up to THREE convincing graphic-match object pairs in these two images "
-                        "(outgoing then incoming). Return only "
-                        '{"reason":"short overall explanation","candidates":[{"reason":"short explanation",'
-                        '"boxes":[[x,y,width,height],[x,y,width,height]]}]}. '
-                        "In each pair the first box is in the outgoing image and the second in the incoming image. "
-                        "Coordinates are fractions of the whole supplied image, INCLUDING any letterboxing. "
-                        "Choose distinctive textured regions of similar shape, orientation and size, "
-                        "not sky/water/background, and boxes at least 0.04 wide/high. The objects may differ "
-                        "in identity. Each pair must use different objects; never repeat a pair. "
-                        'If no convincing pair exists return {"reason":"No compatible objects","candidates":[]}. '
-                        "Fewer strong pairs are better than weak ones. Do not invent objects or force a match."
-                    },
+                    {"text": PROMPT},
                     *[
                         {"inline_data": {"mime_type": "image/jpeg", "data": f["first"]}}
                         for f in frames
                     ],
-                ]
+                ],
+                schema=CANDIDATE_SCHEMA,
             )
         )
         progress("tracking", False)
         tracked = []
-        for position, index in enumerate(rank(found)[:MAX_TRACKED]):
+        for position, index in enumerate(rank(found, aspect, limits)[:MAX_TRACKED]):
             media.check()
             if position and clock() - started > BUDGET_SECONDS - CANDIDATE_SECONDS:
                 complete = False
@@ -584,7 +924,7 @@ def propose_match(
                             seed,
                         )["boxes"]
                         for c, (o, n), seed in zip(
-                            clips, windows, found[index]["boxes"]
+                            clips, windows, tracking_seeds(found[index], aspect)
                         )
                     ]
                 )
@@ -607,16 +947,28 @@ def propose_match(
     media.check()
     if hashes != {bid: _digest(p, media) for bid, p in paths.items()}:
         raise AssistantError("media_changed")
-    found, order = evidence["candidates"], rank(evidence["candidates"])
+    found = evidence["candidates"]
+    order = rank(found, aspect, limits)
     outcomes, best = [], None
     for position, (index, tracks) in enumerate(zip(order, evidence["tracked"])):
-        outcome = dict(candidate=index, rank=position, outcome="unstable")
+        geometry, anchored = anchor_geometry(found[index], aspect)
+        outcome = dict(
+            candidate=index, rank=position, outcome="unstable", anchors=anchored
+        )
         outcomes.append(outcome)
         if tracks is None:
             continue
+        if geometry is not None:
+            reference, measured_tracks = calibrated(tracks)
+            geometry, anchored = anchor_geometry(found[index], aspect, reference)
+            outcome["anchors"] = anchored
+            if geometry is not None:
+                tracks = measured_tracks
         try:
             used = []
-            target, transforms = align(tracks, used=used)
+            target, transforms = align(
+                tracks, used=used, anchors=geometry, limits=limits
+            )
         except AssistantError as exc:
             if exc.code not in {"no_match", "tracking_unavailable"}:
                 raise
@@ -627,11 +979,12 @@ def propose_match(
             outcome="valid", models=used, **measured, **stability(transforms)
         )
         if best is None or round(measured["cost"], 9) < round(best[3]["cost"], 9):
-            best = (position, target, transforms, measured)
+            names = [a["name"].strip() for a in kept_anchors(found[index])]
+            best = (position, target, transforms, measured, geometry and names)
     operations, target, status = [], {"x": 0.5, "y": 0.5, "height": 0}, "no_match"
-    reason = evidence["reason"] if not found else UNSUITABLE
+    reason = evidence["reason"] if not found else UNSUITABLE if order else NO_FIT
     if best:
-        position, target, transforms, measured = best
+        position, target, transforms, measured, names = best
         index = order[position]
         operations = [
             dict(
@@ -642,6 +995,8 @@ def propose_match(
         ]
         status = "matched"
         reason = found[index]["reason"].strip()
+        if names:
+            reason = f"{reason}{'' if reason[-1] in '.!?' else '.'} Lined up on {', '.join(names)[:120]}"
         reason = (
             f"{reason}{'' if reason[-1] in '.!?' else '.'} Chose ranked pair {position + 1} of "
             f"{len(order)} by lowest crop/motion cost: {measured['zoom']:.2f}x zoom, "
@@ -661,6 +1016,7 @@ def propose_match(
             selected=None if best is None else order[best[0]],
             complete=complete,
             cached=cached,
+            zoom_limits=limits,
             elapsed=clock() - started,
         )
     return dict(

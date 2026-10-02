@@ -268,15 +268,28 @@ def main():
         model = "gemini-fixture"
         calls = 0
 
-        def generate(self, parts):
+        def generate(self, parts, schema=None):
             # Known fixture seeds replace only semantic selection. Tracking/geometry remain real.
             self.calls += 1
+
+            def native(b):
+                # Gemini's [ymin, xmin, ymax, xmax] on 0-1000.
+                return [
+                    b[1] * 1000,
+                    b[0] * 1000,
+                    (b[1] + b[3]) * 1000,
+                    (b[0] + b[2]) * 1000,
+                ]
+
             return dict(
                 reason="Controlled candidates",
                 candidates=[
-                    dict(reason="Zoomed background corner", boxes=ZOOMED),
-                    dict(reason="Controlled textured discs", boxes=DISC),
-                    dict(reason="Flat background corner", boxes=FLAT),
+                    dict(reason=r, subject=[native(b) for b in boxes], anchors=[])
+                    for r, boxes in (
+                        ("Zoomed background corner", ZOOMED),
+                        ("Controlled textured discs", DISC),
+                        ("Flat background corner", FLAT),
+                    )
                 ],
             )
 
@@ -284,11 +297,14 @@ def main():
         def __init__(self, provider):
             self.model, self.provider, self.calls = provider.model, provider, 0
 
-        def generate(self, parts):
+        def generate(self, parts, **options):
             self.calls += 1
-            return self.provider.generate(parts)
+            return self.provider.generate(parts, **options)
 
     real_native = match_cuts.native_frames
+    # The 320x180 synthetic discs would cap zoom at 1.1x on a 1080p canvas; the
+    # resolution limit has its own tests, so keep the native 2x ceiling here.
+    match_cuts.zoom_limit = lambda *_: 2.0
     helper = dict(calls=0, seeds=[])
 
     def native_frames(*arguments):

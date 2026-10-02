@@ -42,16 +42,17 @@ class Gemini:
             os.environ.get("GEMINI_MODEL") or settings.get("gemini_model", "gemini-3.8-flash"),
         )
 
-    def generate(self, parts: list[dict]) -> dict:
+    def generate(self, parts: list[dict], schema: dict | None = None) -> dict:
+        """`schema` asks the API to constrain the JSON shape; callers still validate."""
+        config = {
+            "responseMimeType": "application/json",
+            "temperature": 0.2,
+            "maxOutputTokens": 8192,
+        }
+        if schema is not None:
+            config["responseSchema"] = schema
         body = json.dumps(
-            {
-                "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "temperature": 0.2,
-                    "maxOutputTokens": 8192,
-                },
-            }
+            {"contents": [{"role": "user", "parts": parts}], "generationConfig": config}
         ).encode()
         request = urllib.request.Request(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",

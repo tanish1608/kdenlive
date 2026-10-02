@@ -22,6 +22,22 @@ class GeminiTests(unittest.TestCase):
             finally:
                 self.assertEqual(request.call_count, 1)
 
+    def test_optional_schema_constrains_only_requests_that_ask(self):
+        payload = dict(
+            candidates=[dict(finishReason="STOP", content=dict(parts=[dict(text='{"a":1}')]))]
+        )
+        for schema in (None, {"type": "OBJECT"}):
+            response = Mock()
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=None)
+            response.read.return_value = json.dumps(payload).encode()
+            with patch("urllib.request.urlopen", return_value=response) as request:
+                result = Gemini("private-key").generate([{"text": "x"}], schema=schema)
+            self.assertEqual(result, {"a": 1})
+            config = json.loads(request.call_args.args[0].data)["generationConfig"]
+            self.assertEqual(config.get("responseSchema"), schema)
+            self.assertEqual(config["responseMimeType"], "application/json")
+
     def test_partial_answers_and_thoughts_are_never_accepted(self):
         for finish, code in (
             ("MAX_TOKENS", "provider_output_limit"),
