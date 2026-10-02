@@ -569,7 +569,7 @@ QString Montaz::validateTimingProposal(const QJsonObject &snapshot, const QJsonO
         const auto analysis = proposal.value(QStringLiteral("analysis")).toObject();
         if (!fields(analysis, {QStringLiteral("version"), QStringLiteral("mode"), QStringLiteral("bpm"), QStringLiteral("periodicity"),
                                QStringLiteral("support"), QStringLiteral("reason"), QStringLiteral("cached")}) ||
-            analysis.value(QStringLiteral("version")) != QStringLiteral("periodic-onsets-1") || !analysis.value(QStringLiteral("cached")).isBool())
+            analysis.value(QStringLiteral("version")) != QStringLiteral("periodic-onsets-2") || !analysis.value(QStringLiteral("cached")).isBool())
             return invalid();
         for (const auto &key : {QStringLiteral("bpm"), QStringLiteral("periodicity"), QStringLiteral("support")}) {
             const auto number = analysis.value(key);

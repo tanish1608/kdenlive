@@ -792,7 +792,7 @@ EXIT
             worker.replace("FAULT", fault == 3 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)" : "pass");
             worker.replace("CHANGE", fault == 1   ? "p['operations'][0]['in_frame']=1"
                                      : fault == 4 ? "p['protocol_version']=4;p.pop('accents');p['anchors']=[15,30,45,64,90,116,150];p['analysis']=dict(version="
-                                                    "'periodic-onsets-1',mode='beats',bpm=120,periodicity=.9,support=.9,reason='none',cached=True)"
+                                                    "'periodic-onsets-2',mode='beats',bpm=120,periodicity=.9,support=.9,reason='none',cached=True)"
                                                   : "pass");
             worker.replace("EXIT", fault == 2 ? "sys.exit(7)" : "pass");
             QTemporaryDir temp;
@@ -813,17 +813,26 @@ EXIT
     }
     void rhythmicTimingRequiresStrictEvidenceAndObservedAnchors()
     {
+        // Read the real worker's version so a Python cache bump cannot silently
+        // leave the native validator and its hand-written fixtures behind.
+        QProcess workerVersion;
+        workerVersion.start(qEnvironmentVariable("MONTAZ_TEST_PYTHON"),
+                            {QStringLiteral("-c"), QStringLiteral("import os,sys; sys.path.insert(0,os.environ['MONTAZ_TEST_SOURCE']); "
+                                                                  "from montaz_assistant.beats import VERSION; print(VERSION)")});
+        QVERIFY(workerVersion.waitForFinished(5000));
+        QCOMPARE(workerVersion.exitCode(), 0);
+        const auto version = QString::fromUtf8(workerVersion.readAllStandardOutput()).trimmed();
         auto value = timingProposal();
         value["protocol_version"] = 4;
         value.remove("accents");
         value["anchors"] = QJsonArray{15, 30, 45, 64, 90, 116, 150};
-        const QJsonObject analysis{
-            {"version", "periodic-onsets-1"}, {"mode", "beats"}, {"bpm", 120}, {"periodicity", 0.9}, {"support", 0.9}, {"reason", "none"}, {"cached", false}};
+        const QJsonObject analysis{{"version", version}, {"mode", "beats"},  {"bpm", 120},     {"periodicity", 0.9},
+                                   {"support", 0.9},     {"reason", "none"}, {"cached", false}};
         value["analysis"] = analysis;
         QVERIFY(Montaz::validateTimingProposal(timingSnapshot(), timingSpec(), value).isEmpty());
-        for (const auto &change : {QJsonObject{{"version", "old"}}, QJsonObject{{"mode", "downbeats"}}, QJsonObject{{"bpm", true}}, QJsonObject{{"bpm", 181}},
-                                   QJsonObject{{"periodicity", 0.54}}, QJsonObject{{"support", 0.69}}, QJsonObject{{"reason", "weak_periodicity"}},
-                                   QJsonObject{{"cached", 0}}, QJsonObject{{"extra", 1}}}) {
+        for (const auto &change : {QJsonObject{{"version", "periodic-onsets-1"}}, QJsonObject{{"version", "old"}}, QJsonObject{{"mode", "downbeats"}},
+                                   QJsonObject{{"bpm", true}}, QJsonObject{{"bpm", 181}}, QJsonObject{{"periodicity", 0.54}}, QJsonObject{{"support", 0.69}},
+                                   QJsonObject{{"reason", "weak_periodicity"}}, QJsonObject{{"cached", 0}}, QJsonObject{{"extra", 1}}}) {
             auto malformed = value;
             auto evidence = analysis;
             for (auto it = change.begin(); it != change.end(); ++it)

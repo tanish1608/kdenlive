@@ -429,7 +429,7 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
             proposal[QStringLiteral("protocol_version")] = 4;
             proposal.remove(QStringLiteral("accents"));
             proposal[QStringLiteral("anchors")] = QJsonArray{shot / 2, shot + 3, shot * 3 / 2, 2 * shot - 3, shot * 5 / 2};
-            proposal[QStringLiteral("analysis")] = QJsonObject{{QStringLiteral("version"), QStringLiteral("periodic-onsets-1")},
+            proposal[QStringLiteral("analysis")] = QJsonObject{{QStringLiteral("version"), QStringLiteral("periodic-onsets-2")},
                                                                {QStringLiteral("mode"), QStringLiteral("beats")},
                                                                {QStringLiteral("bpm"), 120},
                                                                {QStringLiteral("periodicity"), 1},

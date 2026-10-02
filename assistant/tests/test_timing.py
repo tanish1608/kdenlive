@@ -158,7 +158,7 @@ class TimingTests(unittest.TestCase):
                 support=1,
                 reason="none",
                 cached=False,
-                version="periodic-onsets-1",
+                version="periodic-onsets-2",
             )
 
         with patch("montaz_assistant.timing.analyze", side_effect=change):
