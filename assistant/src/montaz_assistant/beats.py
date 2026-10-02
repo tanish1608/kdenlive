@@ -16,7 +16,7 @@ from .gemini import AssistantError
 from .planning import MediaTools
 from .protocol import decode, fields
 
-VERSION = "periodic-onsets-1"
+VERSION = "periodic-onsets-2"
 SAMPLE_RATE = 8000
 HOP = 80
 TICKS_PER_SECOND = SAMPLE_RATE // HOP
@@ -63,7 +63,9 @@ def onset_envelope(raw: bytes, media: MediaTools) -> list[float]:
             level = math.log1p(max(0, energy - 25))
             strength += weight * max(0, level - previous[band] - 0.04)
             previous[band] = level
-        onset.append(strength)
+        # The first block has no preceding audio to compare against. Treating
+        # its whole bed level as an attack can hide every subsequent beat.
+        onset.append(strength if offset else 0.0)
     return onset
 
 

@@ -16,7 +16,7 @@ from .gemini import AssistantError, Gemini
 from .planning import MediaTools
 from .protocol import decode, fields, frame
 
-VERSION = "speech-captions-1"
+VERSION = "speech-captions-2"
 
 
 def caption_spec(snapshot, raw):
@@ -152,6 +152,44 @@ def is_silent(pcm):
     return sum(v * v for v in samples) / len(samples) < (32768 * 0.001) ** 2
 
 
+def map_segments(segments, clip, rate):
+    """Keep all recognised words in ordered, nonempty native frame intervals."""
+    mapped = []
+    num, den = rate.numerator, rate.denominator * 1000
+    for segment in segments:
+        start = segment["start_ms"] * num // den
+        end = min(clip["duration_frames"], (segment["end_ms"] * num + den - 1) // den)
+        previous = (
+            mapped[-1]["start_frame"]
+            + mapped[-1]["duration_frames"]
+            - clip["start_frame"]
+            if mapped
+            else 0
+        )
+        start = max(start, previous)
+        if end <= start:
+            if start < clip["duration_frames"]:
+                end = start + 1
+            elif mapped:
+                # At the clip boundary there is no spare frame. Combine words
+                # only when the existing text/line constraints still hold.
+                mapped[-1]["text"] = caption_text(
+                    mapped[-1]["text"] + " " + segment["text"]
+                )
+                continue
+            else:
+                raise AssistantError("invalid_captions")
+        mapped.append(
+            dict(
+                instance_id=clip["instance_id"],
+                start_frame=clip["start_frame"] + start,
+                duration_frames=end - start,
+                text=caption_text(segment["text"]),
+            )
+        )
+    return mapped
+
+
 def propose_captions(
     snapshot,
     request_id,
@@ -210,8 +248,16 @@ def propose_captions(
             target = cache / f"{key}.json"
             try:
                 segments = validate_segments(decode(target.read_bytes()), duration_ms)
+                mapped = map_segments(segments, c, snapshot.frame_rate)
                 cached += 1
             except (OSError, ValueError):
+                # A valid transcript can still be unusable at this frame rate.
+                # Discard it before one fresh recognition attempt, never poison
+                # every later request with the same cached mapping failure.
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 media.check()
                 stream = io.BytesIO()
                 with wave.open(stream, "wb") as w:
@@ -233,6 +279,9 @@ def propose_captions(
                     ]
                 )
                 segments = validate_segments(raw, duration_ms)
+                mapped = map_segments(segments, c, snapshot.frame_rate)
+                if len(captions) + len(mapped) > 128:
+                    raise AssistantError("invalid_captions")
                 media.check()
                 if (path.stat().st_size, path.stat().st_mtime_ns) != identity:
                     raise AssistantError("media_changed")
@@ -245,31 +294,9 @@ def propose_captions(
                     temp.replace(target)
                 finally:
                     temp.unlink(missing_ok=True)
-            for s in segments:
-                num, den = (
-                    snapshot.frame_rate.numerator,
-                    snapshot.frame_rate.denominator * 1000,
-                )
-                start = s["start_ms"] * num // den
-                end = min(c["duration_frames"], (s["end_ms"] * num + den - 1) // den)
-                start = max(
-                    start,
-                    captions[-1]["start_frame"]
-                    + captions[-1]["duration_frames"]
-                    - c["start_frame"]
-                    if captions
-                    else 0,
-                )
-                if end <= start:
-                    raise AssistantError("invalid_captions")
-                captions.append(
-                    dict(
-                        instance_id=c["instance_id"],
-                        start_frame=c["start_frame"] + start,
-                        duration_frames=end - start,
-                        text=caption_text(s["text"]),
-                    )
-                )
+            if len(captions) + len(mapped) > 128:
+                raise AssistantError("invalid_captions")
+            captions.extend(mapped)
         if (path.stat().st_size, path.stat().st_mtime_ns) != identity:
             raise AssistantError("media_changed")
         checked += 1

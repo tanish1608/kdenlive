@@ -365,17 +365,22 @@ def plan_slots(
         )
     # Opening and ending each need one fitting source, so they are allocated
     # first; the middle slots then share what remains. Each source counts once.
-    remaining, counts = dict(sources_by_role), {}
+    remaining, counts = dict(sources_by_role), dict.fromkeys(SLOTS, 0)
+    # Reserve one source for each fitting slot before distributing extras.
+    # Otherwise the detail slot can consume all action footage and falsely
+    # report that development has none, even when several sources fit both.
     for name in ("opening", "ending", "detail_or_action", "development"):
         s = next(x for x in r.slots if x.name == name)
-        count = 0
         for role in s.roles:
-            take = remaining.get(role, 0)
-            if name in ("opening", "ending"):
-                take = min(take, 1 - count)
-            count += take
-            remaining[role] = remaining.get(role, 0) - take
-        counts[name] = count
+            if remaining.get(role, 0):
+                counts[name] = 1
+                remaining[role] -= 1
+                break
+    for name in ("detail_or_action", "development"):
+        s = next(x for x in r.slots if x.name == name)
+        for role in s.roles:
+            counts[name] += remaining.get(role, 0)
+            remaining[role] = 0
     slots, notes = [], []
     for s in r.slots:
         frames = (

@@ -218,7 +218,11 @@ class Discovery:
 
 def _native_key(value: str) -> tuple:
     # Native IDs are usually decimal; order them numerically, then textually.
-    return (0, int(value), value) if value.isdigit() else (1, 0, value)
+    return (
+        (0, int(value), value)
+        if value.isascii() and value.isdecimal()
+        else (1, 0, value)
+    )
 
 
 def _window_key(w: EvidenceWindow) -> tuple:

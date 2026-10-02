@@ -61,6 +61,12 @@ TRAVEL = [
 
 
 class ShotDiscoveryTests(unittest.TestCase):
+    def test_unicode_identifiers_do_not_get_parsed_as_decimal_native_ids(self):
+        windows = [window("²", "wheel and tyre"), window("3", "wheel and tyre")]
+        result = discover(windows, RATE)
+        self.assertEqual(len(result.pairs), 1)
+        self.assertEqual(discover(windows[::-1], RATE), result)
+
     def test_wheels_and_car_fronts_form_separate_unverified_groups(self):
         result = discover(WHEELS + FRONTS, RATE)
         subjects = [g.subject for g in result.groups]

@@ -91,6 +91,7 @@ def main() -> int:
                 str(texture),
             ],
             check=True,
+            timeout=60,
         )
         for name, (graph, expected) in FIXTURES.items():
             clip = root / f"{name}.mp4"
@@ -121,6 +122,7 @@ def main() -> int:
                     str(clip),
                 ],
                 check=True,
+                timeout=60,
             )
             jobs.append((name, clip, 0, 24, 1, expected))
     for spec in args.clip:

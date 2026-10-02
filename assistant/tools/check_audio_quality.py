@@ -182,7 +182,12 @@ def main() -> int:
             dict(
                 test=test,
                 reproduced=bool(outcome.expectedFailures),
-                fixed=bool(outcome.unexpectedSuccesses),
+                fixed=bool(
+                    outcome.testsRun == 1
+                    and outcome.wasSuccessful()
+                    and not outcome.expectedFailures
+                ),
+                failed=bool(outcome.errors or outcome.failures),
             )
         )
 
@@ -241,7 +246,7 @@ def main() -> int:
         ],
     )
     print(f"Report: {root / 'audio-quality-report.json'} ({report['seconds']} s)")
-    return 0
+    return int(any(b["failed"] for b in bugs))
 
 
 if __name__ == "__main__":

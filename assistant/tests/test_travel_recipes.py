@@ -159,6 +159,16 @@ class TravelRecipeTests(unittest.TestCase):
         reordered = dict(reversed(list(FULL.items())))
         self.assertEqual(plan_slots(recipe("adventure"), NTSC, 45, reordered), first)
 
+    def test_action_footage_can_fill_both_middle_slots_without_repeats(self):
+        plan = plan_slots(
+            recipe("adventure"), NTSC, 12, {"establishing": 2, "action": 3}
+        )
+        counts = {s.slot: s.available_sources for s in plan.slots}
+        self.assertGreater(counts["development"], 0)
+        self.assertGreater(counts["detail_or_action"], 0)
+        self.assertEqual(sum(counts.values()), 5)
+        self.assertTrue(all(s.note is None for s in plan.slots))
+
     def test_invalid_requests_and_records_are_rejected(self):
         r = recipe("postcard")
         for args, code in (

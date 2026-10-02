@@ -4,9 +4,7 @@
 
 Synthetic band-split PCM drives the real onset/tempo code; only decoder and
 provider boundaries are mocked. No credentials, network or real speech.
-Known bugs are recorded as expected failures that assert the correct
-behaviour: when Codex fixes them they become unexpected successes, which fail
-the suite until the decorator is removed.
+The reported bugs now run as ordinary regressions after their fixes.
 """
 
 import hashlib
@@ -170,7 +168,6 @@ class BeatRegressionTests(unittest.TestCase):
             ),
         }
 
-    @unittest.expectedFailure
     def test_known_bug_music_audible_from_the_first_sample_hides_every_onset(self):
         """onset_envelope starts each band's previous level at zero, so audio that
         is already sounding in the first 10 ms block scores a huge onset (19.7
@@ -186,14 +183,13 @@ class BeatRegressionTests(unittest.TestCase):
                 self.assertAlmostEqual(result["bpm"], bpm, delta=0.5)
                 self.assertEqual(score(result, pulse)[0], 1.0)
 
-    def test_the_start_spike_is_the_only_cause(self):
+    def test_initial_audio_is_baseline_and_attacks_remain_detectable(self):
         # Evidence for the proposed fix: each bed is fully detected once the first
         # block's artificial rise from silence is removed, and nothing else changes.
         for name, (raw, pulse, bpm) in self.continuous_beds().items():
             with self.subTest(name=name):
                 envelope = onset_envelope(raw, MediaTools())
-                self.assertGreater(envelope[0], 4 * max(envelope[1:]))
-                envelope[0] = 0.0
+                self.assertEqual(envelope[0], 0.0)
                 result = estimate(envelope, MediaTools())
                 self.assertEqual(result["mode"], "beats")
                 self.assertAlmostEqual(result["bpm"], bpm, delta=0.5)
@@ -433,7 +429,6 @@ class CaptionRegressionTests(unittest.TestCase):
                     self.assertLessEqual(last, length)
                     previous = last
 
-    @unittest.expectedFailure
     def test_known_bug_sub_frame_segment_fails_the_whole_request(self):
         """Valid non-overlapping segments inside one frame collapse to zero length
         after outward rounding; propose_captions raises invalid_captions for the
@@ -448,23 +443,71 @@ class CaptionRegressionTests(unittest.TestCase):
             [c["text"] for c in result["captions"]], ["We made it.", "Oh!"]
         )
 
-    @unittest.expectedFailure
     def test_known_bug_unmappable_answer_is_cached_and_never_retried(self):
-        """Recognised segments are cached before frame mapping is checked, so an
-        answer that fails mapping is reused on every later run without asking the
-        provider again. Proposed fix: map segments to frames before writing cache."""
+        """A genuine mapping failure must not poison subsequent recognition.
+
+        Two full-length phrases fit in milliseconds but not in one native frame;
+        their combined text also exceeds the caption limit, so neither extension
+        nor merging can preserve them. A later valid answer must be requested.
+        """
         bad = [
-            dict(start_ms=0, end_ms=1010, text="We made it."),
-            dict(start_ms=1010, end_ms=1030, text="Oh!"),
+            dict(start_ms=0, end_ms=20, text="a" * 84),
+            dict(start_ms=20, end_ms=30, text="b" * 84),
         ]
         with self.assertRaises(AssistantError):
-            self.captions(tone(-20), bad, cache="shared")
+            self.captions(tone(-20), bad, length=1, cache="shared")
+        self.assertEqual(list((self.root / "shared").glob("*.json")), [])
         _, _, provider = self.captions(
-            tone(-20), [dict(start_ms=0, end_ms=900, text="Hi.")], cache="shared"
+            tone(-20),
+            [dict(start_ms=0, end_ms=20, text="Hi.")],
+            length=1,
+            cache="shared",
         )
         self.assertEqual(
             provider.generate.call_count, 1
         )  # A fresh answer must be requested.
+
+    def test_boundary_phrases_merge_without_losing_words_or_exceeding_the_clip(self):
+        result, _, _ = self.captions(
+            tone(-20),
+            [
+                dict(start_ms=0, end_ms=20, text="We made it."),
+                dict(start_ms=20, end_ms=30, text="Oh!"),
+            ],
+            length=1,
+        )
+        self.assertEqual(
+            result["captions"],
+            [
+                dict(
+                    instance_id="a",
+                    start_frame=0,
+                    duration_frames=1,
+                    text="We made it. Oh!",
+                )
+            ],
+        )
+
+    def test_unmappable_cached_answer_is_discarded_before_a_fresh_request(self):
+        result, _, _ = self.captions(tone(-20), [], length=1, cache="corrupt")
+        self.assertEqual(result["captions"], [])
+        for target in (self.root / "corrupt").glob("*.json"):
+            target.write_text(
+                '{"segments":['
+                '{"start_ms":0,"end_ms":20,"text":"' + "a" * 84 + '"},'
+                '{"start_ms":20,"end_ms":30,"text":"' + "b" * 84 + '"}]}'
+            )
+        result, _, provider = self.captions(
+            tone(-20),
+            [
+                dict(start_ms=0, end_ms=20, text="Hi."),
+            ],
+            length=1,
+            cache="corrupt",
+        )
+        self.assertEqual(provider.generate.call_count, 1)
+        self.assertEqual(result["cached_clips"], 0)
+        self.assertEqual(result["captions"][0]["text"], "Hi.")
 
 
 if __name__ == "__main__":
