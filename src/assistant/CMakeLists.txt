@@ -5,6 +5,7 @@ set(kdenlive_SRCS ${kdenlive_SRCS}
     assistant/chatview.cpp
     assistant/editoradapter.cpp
     assistant/editbatch.cpp
+    assistant/montage.cpp
     assistant/proposal.cpp
     assistant/workerclient.cpp
     PARENT_SCOPE)

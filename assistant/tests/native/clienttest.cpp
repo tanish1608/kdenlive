@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #include "editbatch.h"
+#include "montage.h"
 #include "proposal.h"
 #include "workerclient.h"
 
@@ -241,6 +242,62 @@ QJsonObject matchReview()
             {"target", QJsonObject{{"x", 0.5}, {"y", 0.5}, {"height", 0.2}}},
             {"preview", QJsonObject{{"outgoing", "/9j/2Q=="}, {"incoming", "/9j/2Q=="}}}};
 }
+QJsonObject montageSpec()
+{
+    auto value = matchSpec();
+    auto clips = value["clips"].toArray();
+    auto third = clips[1].toObject();
+    third["instance_id"] = "13";
+    third["bin_id"] = "3";
+    third["start_frame"] = 120;
+    clips.append(third);
+    for (int i = 0; i < clips.size(); ++i) {
+        auto c = clips[i].toObject();
+        c["zoom_limit"] = 1.6;
+        clips[i] = c;
+    }
+    value["clips"] = clips;
+    value["shot_frames"] = 10;
+    value["track_id"] = "1";
+    value["start_frame"] = 180;
+    return value;
+}
+QJsonObject montageSnapshot()
+{
+    auto value = snapshot();
+    QJsonArray occupied;
+    for (const auto v : montageSpec()["clips"].toArray()) {
+        auto c = v.toObject();
+        c.remove("bin_id");
+        c.remove("in_frame");
+        c.remove("zoom_limit");
+        occupied.append(c);
+    }
+    value["occupied"] = occupied;
+    return value;
+}
+QJsonObject montageReview()
+{
+    QJsonArray ops;
+    for (int i : {2, 0, 1}) {
+        QJsonArray keys;
+        for (int j = 0; j < 10; ++j)
+            keys.append(QJsonObject{{"frame", j}, {"x", -0.05}, {"y", -0.05}, {"scale", 1.1}, {"anchor_x", 0.5}, {"anchor_y", 0.5}, {"anchor_height", 0.2}});
+        ops.append(QJsonObject{{"source_instance_id", QString::number(11 + i)}, {"in_frame", 7 + i}, {"keyframes", keys}});
+    }
+    return {{"request_id", "montage"},
+            {"project_id", "project"},
+            {"sequence_id", "sequence"},
+            {"base_revision", 2},
+            {"frame_rate", montageSnapshot()["frame_rate"]},
+            {"protocol_version", 5},
+            {"status", "matched"},
+            {"reason", "One framing for all three shots"},
+            {"source_hashes", QJsonObject{{"1", QString(64, 'a')}, {"2", QString(64, 'b')}, {"3", QString(64, 'c')}}},
+            {"operations", ops},
+            {"target", QJsonObject{{"x", 0.5}, {"y", 0.5}, {"height", 0.22}}},
+            {"excluded", QJsonArray{}}};
+}
 } // namespace
 
 class ClientTest : public QObject
@@ -253,6 +310,106 @@ private Q_SLOTS:
         QStandardPaths::setTestModeEnabled(true);
     }
     void cleanupTestCase() { QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).removeRecursively(); }
+    void montageRequestBoundsSelectionAndAppendSpan()
+    {
+        QVERIFY(Montaz::validateMontageRequest(montageSnapshot(), montageSpec()).isEmpty());
+        for (const auto change : {QJsonObject{{"shot_frames", 7}}, QJsonObject{{"shot_frames", 13}}, QJsonObject{{"shot_frames", true}},
+                                  QJsonObject{{"start_frame", 179}}, QJsonObject{{"track_id", "2"}}, QJsonObject{{"unknown", 0}}}) {
+            auto spec = montageSpec();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                spec[it.key()] = it.value();
+            QVERIFY(!Montaz::validateMontageRequest(montageSnapshot(), spec).isEmpty());
+        }
+        for (const auto change : {QJsonObject{{"in_frame", 299}}, QJsonObject{{"zoom_limit", 3}}, QJsonObject{{"bin_id", "999"}},
+                                  QJsonObject{{"start_frame", 1}}, QJsonObject{{"duration_frames", 4}}, QJsonObject{{"instance_id", "15"}}}) {
+            auto spec = montageSpec();
+            auto clips = spec["clips"].toArray();
+            auto c = clips[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                c[it.key()] = it.value();
+            clips[0] = c;
+            spec["clips"] = clips;
+            QVERIFY(!Montaz::validateMontageRequest(montageSnapshot(), spec).isEmpty());
+        }
+        auto context = montageSnapshot();
+        auto tracks = context["tracks"].toArray();
+        auto track = tracks[0].toObject();
+        track["locked"] = true;
+        tracks[0] = track;
+        context["tracks"] = tracks;
+        QVERIFY(!Montaz::validateMontageRequest(context, montageSpec()).isEmpty());
+    }
+    void montageRequiresCommonFramingAndWholeShotKeys()
+    {
+        QVERIFY(Montaz::validateMontageReview(montageSnapshot(), montageSpec(), montageReview()).isEmpty());
+        for (const auto change :
+             {QJsonObject{{"x", 0.01}}, QJsonObject{{"scale", 1.7}}, QJsonObject{{"frame", 1}}, QJsonObject{{"anchor_x", 0.6}},
+              QJsonObject{{"anchor_x", 0.5015}}, QJsonObject{{"anchor_height", 0.3}}, QJsonObject{{"scale", true}}, QJsonObject{{"expression", "untrusted"}}}) {
+            auto review = montageReview();
+            auto ops = review["operations"].toArray();
+            auto op = ops[1].toObject();
+            auto keys = op["keyframes"].toArray();
+            auto key = keys[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                key[it.key()] = it.value();
+            keys[0] = key;
+            op["keyframes"] = keys;
+            ops[1] = op;
+            review["operations"] = ops;
+            QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), review).isEmpty());
+        }
+        for (const auto change : {QJsonObject{{"in_frame", 4}}, QJsonObject{{"in_frame", 60}}, QJsonObject{{"source_instance_id", "999"}},
+                                  QJsonObject{{"keyframes", QJsonArray{}}}}) {
+            auto review = montageReview();
+            auto ops = review["operations"].toArray();
+            auto op = ops[0].toObject();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                op[it.key()] = it.value();
+            ops[0] = op;
+            review["operations"] = ops;
+            QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), review).isEmpty());
+        }
+    }
+    void montageAccountsForExcludedShotsAndRejectsReplayContext()
+    {
+        auto review = montageReview();
+        auto ops = review["operations"].toArray();
+        ops.removeLast();
+        review["operations"] = ops;
+        QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), review).isEmpty());
+        review["excluded"] = QJsonArray{QJsonObject{{"source_instance_id", "12"}, {"reason", "No compatible framing"}}};
+        QVERIFY(Montaz::validateMontageReview(montageSnapshot(), montageSpec(), review).isEmpty());
+        review["excluded"] = QJsonArray{QJsonObject{{"source_instance_id", "13"}, {"reason", "Duplicate chosen shot"}}};
+        QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), review).isEmpty());
+        for (const auto change : {QJsonObject{{"base_revision", 3}}, QJsonObject{{"protocol_version", 3}}, QJsonObject{{"status", "approved"}},
+                                  QJsonObject{{"request_id", "bad\nrequest"}},
+                                  QJsonObject{{"source_hashes", QJsonObject{{"1", QString(64, 'a') + '\n'}, {"2", QString(64, 'b')}, {"3", QString(64, 'c')}}}},
+                                  QJsonObject{{"source_hashes", QJsonObject{}}}}) {
+            auto value = montageReview();
+            for (auto it = change.begin(); it != change.end(); ++it)
+                value[it.key()] = it.value();
+            QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), value).isEmpty());
+        }
+        auto value = montageReview();
+        auto duplicate = value["operations"].toArray();
+        duplicate[1] = duplicate[0];
+        value["operations"] = duplicate;
+        QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), value).isEmpty());
+    }
+    void montageEmptyResultIsTerminalAndHasNoGeometry()
+    {
+        auto value = montageReview();
+        value["status"] = "no_match";
+        value["operations"] = QJsonArray{};
+        value["target"] = QJsonObject{};
+        QJsonArray excluded;
+        for (int id = 11; id <= 13; ++id)
+            excluded.append(QJsonObject{{"source_instance_id", QString::number(id)}, {"reason", "No fit"}});
+        value["excluded"] = excluded;
+        QVERIFY(Montaz::validateMontageReview(montageSnapshot(), montageSpec(), value).isEmpty());
+        value["target"] = montageReview()["target"];
+        QVERIFY(!Montaz::validateMontageReview(montageSnapshot(), montageSpec(), value).isEmpty());
+    }
     void matchContractsRejectUnsafeTransformsAndStaleIdentity()
     {
         QVERIFY(Montaz::validateMatchRequest(matchSnapshot(), matchSpec()).isEmpty());

@@ -10,5 +10,7 @@ TARGET = montaz-client-test
 INCLUDEPATH += ../../../src/assistant
 SOURCES += clienttest.cpp ../../../src/assistant/proposal.cpp ../../../src/assistant/workerclient.cpp
 SOURCES += ../../../src/assistant/editbatch.cpp
+SOURCES += ../../../src/assistant/montage.cpp
 HEADERS += ../../../src/assistant/proposal.h ../../../src/assistant/workerclient.h
 HEADERS += ../../../src/assistant/editbatch.h
+HEADERS += ../../../src/assistant/montage.h

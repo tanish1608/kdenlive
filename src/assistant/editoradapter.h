@@ -28,6 +28,8 @@ public:
     QString applyDraft(const QJsonObject &snapshot, const QJsonObject &draft, const QJsonObject &proposal);
     QJsonObject matchRequest();
     QString applyMatch(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);
+    QJsonObject montageRequest(int shotFrames = 10);
+    QString applyMontage(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);
     QJsonObject captionRequest();
     QJsonObject audioSources(const QJsonObject &snapshot, const QSet<QString> &selected);
     QString applyCaptions(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);

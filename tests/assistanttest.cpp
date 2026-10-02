@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #include "assistant/editbatch.h"
 #include "assistant/editoradapter.h"
+#include "assistant/montage.h"
 #include "assistant/proposal.h"
 #include "bin/model/subtitlemodel.hpp"
 #include "bin/projectclip.h"
@@ -799,6 +800,334 @@ TEST_CASE("Headless master-effect loading restores subtitles without a main wind
     document.closing = true;
     bin->clean();
     pCore->projectManager()->testSetDocument(nullptr);
+}
+
+TEST_CASE("Quick montage appends short aligned shots with one native undo", "[Montaz][Montage]")
+{
+    const auto oldProfile = pCore->getCurrentProfilePath();
+    const int length = GENERATE(8, 10, 12);
+    const auto profile = GENERATE(QStringLiteral("atsc_1080p_25"), QStringLiteral("atsc_1080p_2997"));
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto undo = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(undo);
+    pCore->projectManager()->testSetDocument(&document);
+    REQUIRE(pCore->setCurrentProfile(profile));
+    auto timeline = TimelineItemModel::construct(document.uuid(), undo);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int track = -1, audio = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, track));
+    REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    QList<int> ids;
+    QStringList bins;
+    for (int i = 0; i < 3; ++i) {
+        const auto bid = KdenliveTests::createAVProducer(pCore->getProjectProfile(), bin);
+        int id = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/2/21").arg(bid), track, i * 20, id, true, false, false));
+        ids << id;
+        bins << bid;
+    }
+    int neighbor = -1, sound = -1;
+    REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/9").arg(bins[0]), track, 90, neighbor, true, false, false));
+    REQUIRE(timeline->requestClipInsertion(QStringLiteral("A%1/0/9").arg(bins[0]), audio, 120, sound, true, false, false));
+    REQUIRE(timeline->requestSetSelection({ids[0], ids[1], ids[2]}));
+    undo->clear();
+    {
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot(), spec = adapter.montageRequest(length);
+        REQUIRE_FALSE(spec.isEmpty());
+        REQUIRE(spec.value("start_frame").toInt() >= 130);
+        QJsonArray operations;
+        QJsonObject hashes;
+        for (const auto &bid : bins) {
+            QFile file(bin->getClipByBinID(bid)->clipUrl());
+            REQUIRE(file.open(QIODevice::ReadOnly));
+            hashes[bid] = QString::fromLatin1(QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+        }
+        for (int i : {2, 0, 1}) {
+            QJsonArray keys;
+            for (int j = 0; j < length; ++j)
+                keys.append(
+                    QJsonObject{{"frame", j}, {"x", -0.025}, {"y", -0.025}, {"scale", 1.05}, {"anchor_x", 0.5}, {"anchor_y", 0.5}, {"anchor_height", 0.2}});
+            operations.append(QJsonObject{{"source_instance_id", QString::number(ids[i])}, {"in_frame", 3 + i}, {"keyframes", keys}});
+        }
+        QJsonObject review{{"request_id", "quick-montage-test"},
+                           {"project_id", context.value("project_id")},
+                           {"sequence_id", context.value("sequence_id")},
+                           {"base_revision", context.value("revision")},
+                           {"frame_rate", context.value("frame_rate")},
+                           {"protocol_version", 5},
+                           {"status", "matched"},
+                           {"reason", "Controlled shared framing"},
+                           {"source_hashes", hashes},
+                           {"operations", operations},
+                           {"target", QJsonObject{{"x", 0.5}, {"y", 0.5}, {"height", 0.21}}},
+                           {"excluded", QJsonArray{}}};
+        REQUIRE(Montaz::validateMontageReview(context, spec, review).isEmpty());
+        SECTION("Reordered short copies preserve originals, neighbors and audio")
+        {
+            REQUIRE(adapter.applyMontage(context, spec, review).isEmpty());
+            REQUIRE(undo->count() == 1);
+            REQUIRE(timeline->getTrackClipsCount(track) == 7);
+            REQUIRE(timeline->getTrackClipsCount(audio) == 1);
+            QStringList saved;
+            int index = 0;
+            for (int source : {2, 0, 1}) {
+                const int id = timeline->getClipByPosition(track, spec.value("start_frame").toInt() + index * length);
+                REQUIRE(id >= 0);
+                REQUIRE(timeline->getClipBinId(id) == bins[source]);
+                REQUIRE(timeline->getClipIn(id) == 3 + source);
+                REQUIRE(timeline->getClipPlaytime(id) == length);
+                REQUIRE(timeline->getClipByPosition(track, spec.value("start_frame").toInt() + (index + 1) * length - 1) == id);
+                const auto model = timeline->getClipEffectStackModel(id)->getAssetModelById(QStringLiteral("qtblend"));
+                REQUIRE(model);
+                const auto parameters = model->getAllParameters();
+                model->prepareKeyframes();
+                REQUIRE(parameters == model->getAllParameters());
+                const auto rect = std::find_if(parameters.begin(), parameters.end(), [](const auto &v) { return v.first == QStringLiteral("rect"); });
+                REQUIRE(rect != parameters.end());
+                REQUIRE(rect->second.toString().split(';').size() == length);
+                REQUIRE(rect->second.toString().startsWith(QString::number(3 + source) + QLatin1Char('=')));
+                saved << rect->second.toString();
+                ++index;
+            }
+            for (int i = 0; i < ids.size(); ++i) {
+                REQUIRE(timeline->getClipPosition(ids[i]) == i * 20);
+                REQUIRE(timeline->getClipIn(ids[i]) == 2);
+                REQUIRE(timeline->getClipPlaytime(ids[i]) == 20);
+                REQUIRE(timeline->getClipEffectStackModel(ids[i])->rowCount() == 0);
+            }
+            REQUIRE(timeline->getClipPosition(neighbor) == 90);
+            REQUIRE(timeline->getClipPosition(sound) == 120);
+            REQUIRE(timeline->checkConsistency());
+            REQUIRE_FALSE(adapter.applyMontage(context, spec, review).isEmpty());
+            undo->undo();
+            REQUIRE(timeline->getTrackClipsCount(track) == 4);
+            REQUIRE(timeline->getClipPosition(sound) == 120);
+            REQUIRE_FALSE(adapter.applyMontage(context, spec, review).isEmpty());
+            undo->redo();
+            REQUIRE(timeline->getTrackClipsCount(track) == 7);
+            for (int i = 0; i < saved.size(); ++i) {
+                const int id = timeline->getClipByPosition(track, spec.value("start_frame").toInt() + i * length);
+                const auto params = timeline->getClipEffectStackModel(id)->getAssetModelById(QStringLiteral("qtblend"))->getAllParameters();
+                const auto rect = std::find_if(params.begin(), params.end(), [](const auto &v) { return v.first == QStringLiteral("rect"); });
+                REQUIRE(rect != params.end());
+                REQUIRE(rect->second.toString() == saved[i]);
+            }
+            REQUIRE(timeline->checkConsistency());
+        }
+        SECTION("Source checksum and selected-source changes reject before insertion")
+        {
+            auto bad = review;
+            auto changed = hashes;
+            changed[bins[0]] = QString(64, 'a');
+            bad["source_hashes"] = changed;
+            REQUIRE_FALSE(adapter.applyMontage(context, spec, bad).isEmpty());
+            REQUIRE(timeline->requestSetSelection({ids[0], ids[1]}));
+            REQUIRE_FALSE(adapter.applyMontage(context, spec, review).isEmpty());
+            REQUIRE(undo->count() == 0);
+            REQUIRE(timeline->getTrackClipsCount(track) == 4);
+        }
+        SECTION("Original source trims and common framing are enforced")
+        {
+            auto bad = review;
+            auto ops = operations;
+            auto op = ops[1].toObject();
+            op["in_frame"] = 0;
+            ops[1] = op;
+            bad["operations"] = ops;
+            REQUIRE_FALSE(adapter.applyMontage(context, spec, bad).isEmpty());
+            op = operations[1].toObject();
+            auto keys = op["keyframes"].toArray();
+            auto key = keys[0].toObject();
+            key["anchor_x"] = 0.7;
+            keys[0] = key;
+            op["keyframes"] = keys;
+            ops[1] = op;
+            bad["operations"] = ops;
+            REQUIRE_FALSE(adapter.applyMontage(context, spec, bad).isEmpty());
+            REQUIRE(undo->count() == 0);
+            REQUIRE(timeline->getTrackClipsCount(track) == 4);
+        }
+        SECTION("A partial insertion and effect batch rolls back on failure")
+        {
+            int step = 0;
+            const auto result = Montaz::applyInsertBatch(
+                operations,
+                [&](const QJsonObject &, Montaz::UndoFunction &u, Montaz::UndoFunction &r) {
+                    if (++step == 2) return false;
+                    int id = -1;
+                    if (!timeline->requestClipInsertion(QStringLiteral("V%1/3/%2").arg(bins[0]).arg(3 + length - 1), track, spec.value("start_frame").toInt(),
+                                                        id, false, true, false, u, r, {}, 1))
+                        return false;
+                    return timeline->getClipEffectStackModel(id)->appendEffectWithUndo(QStringLiteral("qtblend"), u, r).first;
+                },
+                [](const auto &, const auto &) { FAIL("Failed montage cannot commit"); });
+            REQUIRE(result == QStringLiteral("apply_failed_rolled_back"));
+            REQUIRE(undo->count() == 0);
+            REQUIRE(timeline->getTrackClipsCount(track) == 4);
+            REQUIRE(timeline->checkConsistency());
+        }
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    pCore->setCurrentProfile(oldProfile);
+}
+
+TEST_CASE("Quick montage shared framing survives serialization and export", "[Montaz][MontageRender]")
+{
+    const auto root = qEnvironmentVariable("MONTAZ_MONTAGE_QA_ROOT");
+    if (root.isEmpty()) {
+        SUCCEED("Set MONTAZ_MONTAGE_QA_ROOT for generated whole-shot render checks");
+        return;
+    }
+    const int length = GENERATE(8, 10, 12);
+    const auto oldProfile = pCore->getCurrentProfilePath();
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto undo = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(undo);
+    pCore->projectManager()->testSetDocument(&document);
+    REQUIRE(pCore->setCurrentProfile(QStringLiteral("atsc_1080p_2997")));
+    auto timeline = TimelineItemModel::construct(document.uuid(), undo);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int track = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, track));
+    QList<int> ids;
+    QStringList bids;
+    QJsonObject hashes;
+    for (int i = 0; i < 3; ++i) {
+        const auto path = QDir(root).filePath(QStringLiteral("subject-%1.mp4").arg(i));
+        auto producer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), path.toUtf8().constData());
+        REQUIRE(producer->is_valid());
+        QString bid;
+        Fun u = []() { return true; }, r = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(bid, producer, QStringLiteral("-1"), u, r));
+        int id = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/59").arg(bid), track, i * 60, id, true, false, false));
+        ids << id;
+        bids << bid;
+        QFile file(path);
+        REQUIRE(file.open(QIODevice::ReadOnly));
+        hashes[bid] = QString::fromLatin1(QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+    }
+    REQUIRE(timeline->requestSetSelection({ids[0], ids[1], ids[2]}));
+    undo->clear();
+    {
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot(), spec = adapter.montageRequest(length);
+        INFO(QJsonDocument(context).toJson(QJsonDocument::Compact).toStdString());
+        QJsonArray metadata;
+        for (const auto &bid : bids) {
+            const auto asset = bin->getClipByBinID(bid);
+            metadata.append(QJsonObject{{"bin", bid},
+                                        {"width", asset->frameSize().width()},
+                                        {"height", asset->frameSize().height()},
+                                        {"effects", asset->getEffectStack()->rowCount()}});
+        }
+        INFO(QJsonDocument(metadata).toJson(QJsonDocument::Compact).toStdString());
+        REQUIRE_FALSE(spec.isEmpty());
+        QJsonArray operations;
+        // Known synthetic rectangles move one source pixel per frame. This
+        // independent ground truth checks native transforms, not AI detection.
+        for (int i : {2, 0, 1}) {
+            const int in = 5 + i * 4;
+            QJsonArray keys;
+            for (int j = 0; j < length; ++j) {
+                const double center = double(900 + i * 60 + in + j) / 1920;
+                keys.append(QJsonObject{
+                    {"frame", j}, {"x", 0.5 - 1.25 * center}, {"y", -0.125}, {"scale", 1.25}, {"anchor_x", center}, {"anchor_y", 0.5}, {"anchor_height", 0.2}});
+            }
+            operations.append(QJsonObject{{"source_instance_id", QString::number(ids[i])}, {"in_frame", in}, {"keyframes", keys}});
+        }
+        const QJsonObject review{{"request_id", "montage-render"},
+                                 {"project_id", context.value("project_id")},
+                                 {"sequence_id", context.value("sequence_id")},
+                                 {"base_revision", context.value("revision")},
+                                 {"frame_rate", context.value("frame_rate")},
+                                 {"protocol_version", 5},
+                                 {"status", "matched"},
+                                 {"reason", "Known moving rectangles, shared framing"},
+                                 {"source_hashes", hashes},
+                                 {"operations", operations},
+                                 {"target", QJsonObject{{"x", 0.5}, {"y", 0.5}, {"height", 0.25}}},
+                                 {"excluded", QJsonArray{}}};
+        REQUIRE(adapter.applyMontage(context, spec, review).isEmpty());
+        REQUIRE(undo->count() == 1);
+        const int start = spec.value("start_frame").toInt();
+        auto checkFrame = [](Mlt::Producer &producer, int position) {
+            producer.seek(position);
+            std::unique_ptr<Mlt::Frame> frame(producer.get_frame());
+            mlt_image_format format = mlt_image_rgb;
+            int width = 640, height = 360;
+            const auto pixels = frame->get_image(format, width, height);
+            REQUIRE(pixels);
+            REQUIRE(format == mlt_image_rgb);
+            int top = height, bottom = -1, count = 0;
+            double sx = 0, sy = 0;
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x) {
+                    const auto p = pixels + 3 * (y * width + x);
+                    if (p[0] > 100 && p[1] > 100 && p[2] < 60) {
+                        top = qMin(top, y);
+                        bottom = qMax(bottom, y);
+                        sx += x;
+                        sy += y;
+                        ++count;
+                    }
+                }
+            REQUIRE(count > 100);
+            REQUIRE(std::abs(sx / count / width - 0.5) < 0.004);
+            REQUIRE(std::abs(sy / count / height - 0.5) < 0.006);
+            REQUIRE(std::abs(double(bottom - top + 1) / height - 0.25) < 0.007);
+        };
+        for (int i = 0; i < 3 * length; ++i)
+            checkFrame(*timeline->tractor(), start + i);
+        const auto scene = QDir(root).filePath(QStringLiteral("montage-%1.mlt").arg(length));
+        {
+            Mlt::Consumer serializer(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+            REQUIRE(serializer.is_valid());
+            serializer.connect(*timeline->tractor());
+            serializer.run();
+        }
+        Mlt::Producer reopened(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+        REQUIRE(reopened.is_valid());
+        for (int i = 0; i < 3 * length; ++i)
+            checkFrame(reopened, start + i);
+        undo->undo();
+        REQUIRE(timeline->getTrackClipsCount(track) == 3);
+        undo->redo();
+        for (int i = 0; i < 3 * length; ++i)
+            checkFrame(*timeline->tractor(), start + i);
+        const auto output = QDir(root).filePath(QStringLiteral("montage-%1.mp4").arg(length));
+        {
+            Mlt::Consumer renderer(pCore->getProjectProfile(), "avformat", output.toUtf8().constData());
+            REQUIRE(renderer.is_valid());
+            renderer.set("vcodec", "libx264");
+            renderer.set("crf", 18);
+            renderer.set("preset", "fast");
+            renderer.set("audio_off", 1);
+            renderer.set("real_time", -1);
+            renderer.set("terminate_on_pause", 1);
+            std::unique_ptr<Mlt::Producer> zone(timeline->tractor()->cut(start, start + 3 * length - 1));
+            renderer.connect(*zone);
+            renderer.run();
+        }
+        REQUIRE(QFileInfo(output).size() > 1000);
+        Mlt::Producer exported(pCore->getProjectProfile(), output.toUtf8().constData());
+        REQUIRE(exported.is_valid());
+        REQUIRE(exported.get_length() == 3 * length);
+        for (int i = 0; i < 3 * length; ++i)
+            checkFrame(exported, i);
+        REQUIRE(timeline->checkConsistency());
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    pCore->setCurrentProfile(oldProfile);
 }
 
 TEST_CASE("Object match cuts add native transforms atomically", "[Montaz]")

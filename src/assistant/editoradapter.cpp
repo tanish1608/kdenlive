@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #include "editoradapter.h"
 #include "editbatch.h"
+#include "montage.h"
 #include "proposal.h"
 
 #include "bin/model/subtitlemodel.hpp"
@@ -23,6 +24,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QMap>
 #include <QThread>
 #include <algorithm>
 #include <limits>
@@ -684,6 +686,139 @@ QString Montaz::EditorAdapter::captionStyle(const QString &preset)
     return {};
 }
 
+namespace {
+bool appendUniformTransform(const std::shared_ptr<TimelineItemModel> &timeline, int id, const QJsonArray &keys, int width, int height,
+                            Montaz::UndoFunction &undo, Montaz::UndoFunction &redo)
+{
+    const auto stack = timeline->getClipEffectStackModel(id);
+    if (!stack->appendEffectWithUndo(QStringLiteral("qtblend"), undo, redo).first) return false;
+    const auto model = stack->getAssetModelById(QStringLiteral("qtblend"));
+    if (!model) return false;
+    QStringList values, rotations, anchors;
+    for (const auto v : keys) {
+        const auto k = v.toObject();
+        const double s = k.value("scale").toDouble();
+        const int frame = timeline->getClipIn(id) + k.value("frame").toInt();
+        rotations.append(QStringLiteral("%1=0").arg(frame));
+        anchors.append(QStringLiteral("%1=0.5 0.5 0 0").arg(frame));
+        values.append(QStringLiteral("%1=%2 %3 %4 %5 1")
+                          .arg(frame)
+                          .arg(k.value("x").toDouble() * width, 0, 'f', 6)
+                          .arg(k.value("y").toDouble() * height, 0, 'f', 6)
+                          .arg(s * width, 0, 'f', 6)
+                          .arg(s * height, 0, 'f', 6));
+    }
+    model->setParameter(QStringLiteral("rect"), values.join(QLatin1Char(';')));
+    // Every animated parameter must share positions when the effect is loaded.
+    model->setParameter(QStringLiteral("rotation"), rotations.join(QLatin1Char(';')));
+    const auto parameters = model->getAllParameters();
+    if (std::any_of(parameters.begin(), parameters.end(), [](const auto &p) { return p.first == QStringLiteral("rotate_anchor"); })) {
+        model->setParameter(QStringLiteral("rotate_anchor"), anchors.join(QLatin1Char(';')));
+    }
+    model->setParameter(QStringLiteral("distort"), QStringLiteral("0"));
+    return true;
+}
+} // namespace
+
+QJsonObject Montaz::EditorAdapter::montageRequest(int shotFrames)
+{
+    const auto current = snapshot();
+    const auto timeline = m_timeline.lock();
+    if (current.isEmpty() || !timeline || shotFrames < 8 || shotFrames > 12 || timeline->getCompositionsCount() ||
+        timeline->getMasterEffectStackModel()->rowCount() > 0 || !pCore->getProjectProfile().progressive() ||
+        pCore->getProjectProfile().sample_aspect_num() != pCore->getProjectProfile().sample_aspect_den())
+        return {};
+    Mlt::Filter transform(pCore->getProjectProfile(), "qtblend");
+    if (!EffectsRepository::get()->exists(QStringLiteral("qtblend")) || !transform.is_valid()) return {};
+    const auto selected = timeline->getCurrentSelection();
+    if (selected.size() < 2 || selected.size() > 6) return {};
+    const auto size = pCore->getCurrentFrameSize();
+    std::vector<QJsonObject> clips;
+    int track = -1;
+    for (int id : selected) {
+        if (!timeline->isClip(id) || timeline->hasPersistentGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 ||
+            timeline->getClipSpeed(id) != 1.0 || timeline->getClipEffectStackModel(id)->rowCount() > 0 ||
+            timeline->getClipState(id).first != PlaylistState::VideoOnly)
+            return {};
+        const int sourceTrack = timeline->getClipTrackId(id);
+        if (sourceTrack < 0 || timeline->isAudioTrack(sourceTrack) || timeline->getTrackEffectStackModel(sourceTrack)->rowCount() > 0 ||
+            (track >= 0 && track != sourceTrack))
+            return {};
+        track = sourceTrack;
+        const auto asset = pCore->projectItemModel()->getClipByBinID(timeline->getClipBinId(id));
+        if (!asset || asset->getEffectStack()->rowCount() > 0 || !QFileInfo(asset->clipUrl()).isFile()) return {};
+        // Kdenlive handles alternate MLT dimension properties, pixel aspect
+        // ratio and original dimensions when a bin asset uses a proxy.
+        const auto sourceSize = asset->frameSize();
+        const int width = sourceSize.width(), height = sourceSize.height();
+        if (width <= 0 || height <= 0) return {};
+        const double density = std::max(double(width) / size.width(), double(height) / size.height());
+        clips.push_back({{"instance_id", QString::number(id)},
+                         {"bin_id", timeline->getClipBinId(id)},
+                         {"track_id", QString::number(track)},
+                         {"start_frame", timeline->getClipPosition(id)},
+                         {"in_frame", timeline->getClipIn(id)},
+                         {"duration_frames", timeline->getClipPlaytime(id)},
+                         {"zoom_limit", std::clamp(1.6 * density, 1.1, 2.0)}});
+    }
+    std::sort(clips.begin(), clips.end(), [](const auto &a, const auto &b) { return a.value("start_frame").toInt() < b.value("start_frame").toInt(); });
+    QJsonArray values;
+    for (const auto &c : clips)
+        values.append(c);
+    const QJsonObject spec{{"clips", values},
+                           {"width", size.width()},
+                           {"height", size.height()},
+                           {"shot_frames", shotFrames},
+                           {"track_id", QString::number(track)},
+                           {"start_frame", timeline->duration()}};
+    return validateMontageRequest(current, spec).isEmpty() ? spec : QJsonObject{};
+}
+
+QString Montaz::EditorAdapter::applyMontage(const QJsonObject &context, const QJsonObject &spec, const QJsonObject &review)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot() != context || montageRequest(spec.value("shot_frames").toInt()) != spec || !validateMontageReview(context, spec, review).isEmpty() ||
+        review.value("status") != "matched")
+        return QStringLiteral("invalid_montage_review");
+    const auto request = review.value("request_id").toString();
+    if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
+    const auto hashes = review.value("source_hashes").toObject();
+    const auto keys = hashes.keys();
+    const auto sources = mediaSources(context, QSet<QString>(keys.begin(), keys.end()));
+    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
+        QFile file(sources.value(it.key()).toString());
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024 * 1024) return QStringLiteral("media_changed");
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        if (!hash.addData(&file) || QString::fromLatin1(hash.result().toHex()) != it.value().toString()) return QStringLiteral("media_changed");
+    }
+    QMap<QString, QString> bins;
+    for (const auto v : spec.value("clips").toArray())
+        bins.insert(v.toObject().value("instance_id").toString(), v.toObject().value("bin_id").toString());
+    const auto timeline = m_timeline.lock();
+    const int width = spec.value("width").toInt(), height = spec.value("height").toInt(), length = spec.value("shot_frames").toInt();
+    const int track = spec.value("track_id").toString().toInt();
+    int position = spec.value("start_frame").toInt();
+    const auto result = applyInsertBatch(
+        review.value("operations").toArray(),
+        [timeline, &position, bins, track, length, width, height](const QJsonObject &op, UndoFunction &undo, UndoFunction &redo) {
+            const int in = op.value("in_frame").toInt();
+            int id = -1;
+            if (!timeline->requestClipInsertion(
+                    QStringLiteral("V%1/%2/%3").arg(bins.value(op.value("source_instance_id").toString())).arg(in).arg(in + length - 1), track, position, id,
+                    false, true, false, undo, redo, {}, 1) ||
+                id < 0)
+                return false;
+            if (!appendUniformTransform(timeline, id, op.value("keyframes").toArray(), width, height, undo, redo)) return false;
+            position += length;
+            return true;
+        },
+        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Create quick match montage")); });
+    if (result.isEmpty()) m_appliedRequests.insert(request);
+    if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
+    invalidate();
+    return result;
+}
+
 QJsonObject Montaz::EditorAdapter::matchRequest()
 {
     const auto current = snapshot();
@@ -743,34 +878,7 @@ QString Montaz::EditorAdapter::applyMatch(const QJsonObject &context, const QJso
         review.value("operations").toArray(),
         [timeline, width, height](const QJsonObject &op, UndoFunction &undo, UndoFunction &redo) {
             const int id = op.value("instance_id").toString().toInt();
-            const auto stack = timeline->getClipEffectStackModel(id);
-            if (!stack->appendEffectWithUndo(QStringLiteral("qtblend"), undo, redo).first) return false;
-            const auto model = stack->getAssetModelById(QStringLiteral("qtblend"));
-            if (!model) return false;
-            QStringList values, rotations, anchors;
-            for (const auto v : op.value("keyframes").toArray()) {
-                const auto k = v.toObject();
-                const double s = k.value("scale").toDouble();
-                const int frame = timeline->getClipIn(id) + k.value("frame").toInt();
-                rotations.append(QStringLiteral("%1=0").arg(frame));
-                anchors.append(QStringLiteral("%1=0.5 0.5 0 0").arg(frame));
-                values.append(QStringLiteral("%1=%2 %3 %4 %5 1")
-                                  .arg(frame)
-                                  .arg(k.value("x").toDouble() * width, 0, 'f', 6)
-                                  .arg(k.value("y").toDouble() * height, 0, 'f', 6)
-                                  .arg(s * width, 0, 'f', 6)
-                                  .arg(s * height, 0, 'f', 6));
-            }
-            model->setParameter(QStringLiteral("rect"), values.join(QLatin1Char(';')));
-            // Kdenlive expects every animated parameter to share the same key positions
-            // when loading an effect. Keep unused rotation parameters constant at those keys.
-            model->setParameter(QStringLiteral("rotation"), rotations.join(QLatin1Char(';')));
-            const auto parameters = model->getAllParameters();
-            if (std::any_of(parameters.begin(), parameters.end(), [](const auto &p) { return p.first == QStringLiteral("rotate_anchor"); })) {
-                model->setParameter(QStringLiteral("rotate_anchor"), anchors.join(QLatin1Char(';')));
-            }
-            model->setParameter(QStringLiteral("distort"), QStringLiteral("0"));
-            return true;
+            return appendUniformTransform(timeline, id, op.value("keyframes").toArray(), width, height, undo, redo);
         },
         [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Align objects across a match cut")); });
     if (result.isEmpty()) m_appliedRequests.insert(request);
