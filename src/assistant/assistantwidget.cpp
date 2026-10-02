@@ -234,6 +234,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                 reply(i18n("Gemini rejected its configuration. Check your API key and model. No captions were applied."));
             else if (code == QStringLiteral("provider_timeout") || code == QStringLiteral("worker_timeout") || code == QStringLiteral("media_timeout"))
                 reply(i18n("Caption recognition timed out. No captions were applied; completed speech results are kept for reuse."));
+            else if (code.startsWith(QStringLiteral("provider_")) || code == QStringLiteral("invalid_model_response"))
+                reply(i18n("Gemini is unavailable, rate limited or could not answer. No captions were applied; completed speech results are kept for reuse."));
             else
                 reply(i18n("Captions could not be prepared. Check source audio and Run logs. No captions were applied."));
             return;
@@ -247,6 +249,9 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                 reply(i18n("Gemini rejected its configuration. Check the API key and model in your assistant settings. No sound was generated."));
             else if (code == QStringLiteral("provider_timeout") || code == QStringLiteral("worker_timeout") || code == QStringLiteral("media_timeout"))
                 reply(i18n("Sound suggestions timed out. No sound was generated or applied. Cached visual evidence remains available."));
+            else if (code.startsWith(QStringLiteral("provider_")) || code == QStringLiteral("invalid_model_response"))
+                reply(i18n(
+                    "Gemini is unavailable, rate limited or could not answer. No sound was generated or applied. Cached visual evidence remains available."));
             else
                 reply(i18n("Sound suggestions could not finish. No sound was generated or applied. Check Run logs before trying again."));
             return;
