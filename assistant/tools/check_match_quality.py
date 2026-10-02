@@ -195,6 +195,43 @@ def decoded(video: Path) -> dict:
     )
 
 
+def validate_stability(comparison: dict) -> None:
+    """Apply absolute output requirements to the native zoom comparison.
+
+    The old S5 check compared the new native measurement with a baseline made by
+    the same helper. That could pass a consistently wrong zoom, so the zoom case
+    is now checked against its known geometry and the expected helper outcome.
+    """
+    if any(
+        result["native_check"] != "pass"
+        for scenario in comparison.values()
+        for result in scenario["models"].values()
+    ):
+        raise RuntimeError("A native stability export failed")
+    constant = comparison["constant"]
+    zoom = comparison["zoom"]
+    stable_constant = constant["models"]["stable"]
+    constant_truth = constant["truth_sweep"]
+    stable_truth = constant_truth["models"]["stable"]
+    if stable_constant["transform"]["scale_change"] > 0.001:
+        raise RuntimeError("Constant-size transform still has visible scale breathing")
+    if stable_constant["decoded"]["size_change_rms"] > 0.008:
+        raise RuntimeError("Constant-size decoded output has excessive size jitter")
+    if stable_truth["cut_center_max"] > 0.007 or stable_truth["cut_center_mean"] > 0.003:
+        raise RuntimeError("Constant-size cut alignment exceeds the native tolerance")
+    if stable_truth["cut_size_mean"] > 0.02:
+        raise RuntimeError("Constant-size cut size mismatch exceeds the native tolerance")
+    zoom_truth = zoom["truth_sweep"]
+    if zoom_truth["rejected"]["helper"] != 0:
+        raise RuntimeError("The zoom helper rejected a controlled valid window")
+    stable_zoom = zoom["models"]["stable"]
+    if stable_zoom["outgoing_scale"][0] <= stable_zoom["outgoing_scale"][1]:
+        raise RuntimeError("The stable model lost the direction of a genuine zoom")
+    stable_zoom_truth = zoom_truth["models"]["stable"]
+    if stable_zoom_truth["cut_size_mean"] > 0.05 or stable_zoom_truth["cut_size_max"] > 0.08:
+        raise RuntimeError("Zoom cut size accuracy exceeds the native tolerance")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--craft-root", type=Path, required=True)
@@ -512,30 +549,7 @@ def main():
         ),
     )
     (root / "selection-report.json").write_text(json.dumps(evidence, indent=2))
-    constant = comparison["constant"]["models"]
-    zoom = comparison["zoom"]["models"]
-    truth = comparison["constant"]["truth_sweep"]["models"]
-    if (
-        any(
-            r["native_check"] != "pass"
-            for scenario in comparison.values()
-            for r in scenario["models"].values()
-        )
-        # Provisional S5 goal: halve RMS scale change on the constant-size fixture.
-        or constant["stable"]["transform"]["scale_change"]
-        > constant["baseline"]["transform"]["scale_change"] / 2
-        or constant["stable"]["decoded"]["size_change_rms"]
-        > constant["baseline"]["decoded"]["size_change_rms"] / 2
-        # Without worsening boundary alignment against ground truth.
-        or truth["stable"]["cut_center_max"]
-        > max(0.007, truth["baseline"]["cut_center_max"])
-        or truth["stable"]["cut_center_mean"]
-        > truth["baseline"]["cut_center_mean"] * 1.05
-        or truth["stable"]["cut_size_mean"] > truth["baseline"]["cut_size_mean"]
-        # Genuine zoom keeps its direction.
-        or zoom["stable"]["outgoing_scale"][0] <= zoom["stable"]["outgoing_scale"][1]
-    ):
-        raise RuntimeError("Stability comparison missed its engineering criteria")
+    validate_stability(comparison)
     for scenario, data in comparison.items():
         for model, r in data["truth_sweep"]["models"].items():
             print(

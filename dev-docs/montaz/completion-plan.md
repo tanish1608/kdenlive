@@ -81,9 +81,11 @@ branch. Read root `AGENTS.md`, this plan, `collaboration.md`, `context.md`, and
 - [x] **S5 — Deliver evidence.** Extend controlled QA to export comparable
   baseline/candidate videos. Provisional goal: halve RMS frame-to-frame scale
   change on constant-size fixtures without worsening existing boundary tolerances;
-  genuine zoom must retain direction and acceptable fit error. Record crop, maximum
+  genuine zoom must retain direction and acceptable absolute fit error. Record crop, maximum
   scale, scale acceleration, residual motion, calls, elapsed time and cache reuse.
-  These are engineering criteria; visible improvement also needs Codex review.
+  These are engineering criteria; the checker must also require ten valid zoom
+  windows and absolute size/center limits, so a consistently wrong zoom cannot pass.
+  Visible improvement on real footage still needs Codex review.
 
 Allowed files: `assistant/src/montaz_assistant/match_cuts.py`, a small adjacent
 pure helper if useful, `assistant/tests/test_match_cuts.py`,

@@ -71,8 +71,9 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   native MLT/CSRT and the lowest crop/motion cost wins.
   Bounded uniform Transform keyframes preserve timing. Comparison, one Undo,
   caching, stale-result rejection and native rendered geometry are exercised.
-  Guarded size/center fitting reduces controlled size jitter; genuine zoom
-  estimation is still unreliable. See [stability evidence](match-stability-report.md).
+  Guarded size/center fitting and native fixed-seed scale registration reduce
+  controlled jitter and recover bounded gradual zoom. Real footage still needs
+  calibration. See [stability evidence](match-stability-report.md).
   This is a selected-pair prototype; it does not search the entire bin.
 - Still pending: deferred portrait framing, additional native failure checks,
   narration, audio pairing/ducking, musical phrase detection, word alignment,

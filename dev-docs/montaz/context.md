@@ -372,16 +372,18 @@ Claude's stability work is complete and undergoing separate integration checks.
 
 Claude `69ad410` adds guarded robust log-height and local-linear center fits,
 retaining original acceptance/coverage/zoom gates and bounded calls. Match geometry
-cache is now `object-match-5`; visual/speech/music caches and protocol-v3 remain.
+cache is now `object-match-6`; visual/speech/music caches and protocol-v3 remain.
+The native tracker now registers a fixed seed appearance against a bounded
+scale/position search, with finite-value, confidence and ambiguous-scale rejection.
 The original branch is preserved. Codex corrected the comparison tool so failed
 zoom exports cannot be reported as success. Combined 200 Python (six real-helper),
 39 transport/seven chat checks, native tests and nine controlled exports pass.
 Separate desktop comparison/Apply/one Undo/Redo/playback/save/fresh reopen pass.
 
-Constant fixture decoded size jitter falls from 1.13% to 0.42%; the tracker still
-misses/delays genuine zoom and the zoom truth sweep remains inaccurate. Do not
-claim reliable zoom tracking or a completed travel film. The 320×180 desktop
-fixture also retains an incoming size trend, illustrating resolution/seed limits.
-See [stability evidence](match-stability-report.md) and the updated completion plan.
-Next: native assistant-draft replacement, beat-before-match workflow and separately
-assigned bounded candidate discovery; robust native zoom remains open.
+The new native helper recovers the controlled 7%, 15%, 18% and 30% zoom windows
+within 4.6% per-frame size error, keeps center error below 0.34 source pixels,
+and passes all ten shifted windows. The quality checker now uses absolute geometry
+limits, so a direction-only result or a helper that silently rejects valid windows
+cannot pass. Real footage, deformation, occlusion and very small zooms remain
+uncalibrated; do not claim finished travel-film quality. See [stability evidence](match-stability-report.md)
+and the updated completion plan.

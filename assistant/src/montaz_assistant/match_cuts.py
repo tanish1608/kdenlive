@@ -18,7 +18,7 @@ from .planning import MediaChildError, MediaTools
 from .match_stability import fit_centers, fit_heights, stability, triangle
 from .protocol import decode, fields, frame
 
-VERSION = "object-match-5"
+VERSION = "object-match-6"
 MODELS = ("baseline", "triangle9", "size-fit", "stable")
 MAX_CANDIDATES = 3
 MAX_TRACKED = 2

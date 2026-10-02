@@ -200,7 +200,34 @@ windows the disc grows up to about 42% within one second.
   exports in `~/Movies/montaz-claude-match-stability/stability/*/{baseline,stable}/`,
   and check Apply, Undo and Redo in the desktop editor, before claiming a visible
   improvement.
-- **No native or protocol change is needed.**
+- The measurements above are the historical S1–S5 result; the native zoom
+  follow-up below supersedes the missed-zoom limitation for its bounded fixtures.
+
+## Codex native zoom follow-up — October 2, 2026
+
+The helper now keeps CSRT's measured position but estimates scale independently
+from a fixed frame-zero appearance. Each frame uses a bounded 9×17×17 search and
+two refinements around the predicted center. A 5% context rim preserves silhouette
+edges, while normalized correlation, variance, finite-value, step and ambiguous
+scale gates reject weak or disappearing subjects. This adds no provider calls,
+dependencies or unbounded work; the existing worker deadline and Stop path remain.
+
+The native regression suite covers constant, growing and shrinking discs, an
+asymmetric textured rectangle with exposure changes, disappearance, and a linear
+gradient whose scale cannot be observed. On the controlled disc fixtures the
+measured final size ratios are 1.062 (true 1.067), 1.154 (1.153), 1.301 (1.300),
+and 0.850 (0.847); worst per-frame size errors are 2.1%, 3.9%, 4.6%, and 3.3%,
+with maximum center errors below 0.34 source pixels. The ten-window zoom truth
+sweep accepts every valid window; the stable rendered cut size error is 1.7%
+mean and 3.4% maximum. A real photograph under a controlled affine zoom reached
+2.9–3.7% maximum size error, so this is a useful native improvement rather than
+evidence that arbitrary footage is solved.
+
+The quality checker now applies absolute limits (constant-size jitter, center and
+size error, all ten helper windows, and zoom direction/accuracy). A result that
+only preserves zoom direction, or silently drops valid windows, cannot pass.
+Deformation, occlusion, large appearance changes, and very small zooms remain
+conservative rejection cases and require future real-footage calibration.
 
 ## Codex acceptance — October 1, 2026
 

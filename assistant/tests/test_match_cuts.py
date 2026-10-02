@@ -1085,7 +1085,7 @@ class MatchStabilityPipelineTests(unittest.TestCase):
         self.provider.generate.return_value = answer(CENTERED)
         self.run_match()
         self.assertTrue(self.run_match()["cached"])
-        with patch.object(match_cuts, "VERSION", "object-match-4"):
+        with patch.object(match_cuts, "VERSION", "object-match-5"):
             self.assertFalse(self.run_match()["cached"])
-        self.assertEqual(match_cuts.VERSION, "object-match-5")
+        self.assertEqual(match_cuts.VERSION, "object-match-6")
         self.assertEqual(self.provider.generate.call_count, 2)

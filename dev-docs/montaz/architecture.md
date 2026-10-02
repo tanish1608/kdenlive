@@ -262,9 +262,11 @@ while work is running; Stop terminates native helper work and discards late resu
 After native tracking, `match_stability.py` fits a robust log-height trend and
 local-linear centers under residual guards. Baseline acceptance gates run first;
 failed fitted geometry falls back to the original solution. At most two tracked
-pairs and one provider call remain. `object-match-5` invalidates changed geometry
-without touching visual/speech/music evidence. These fits reduce quantization
-noise; they cannot correct CSRT's missed/delayed zoom. See the stability report.
+pairs and one provider call remain. `object-match-6` invalidates changed geometry
+without touching visual/speech/music evidence. A native fixed-seed scale-registration
+pass measures size around CSRT's predicted center with bounded search, confidence
+and ambiguity gates; it rejects disappearing or scale-ambiguous subjects instead of
+accepting background tracking. See the stability report.
 
 Protocol-v3 reviews carry only allowlisted uniform numeric transform keyframes,
 source identities, native clip IDs and bounded JPEG boundary previews. Position and

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 // Bounded, separate-process native decoding/tracking. Never reads an editor project.
+#include "scaleregistration.h"
 #include <QBuffer>
 #include <QFile>
 #include <QGuiApplication>
@@ -103,6 +104,7 @@ int main(int argc, char **argv)
         filter.set_in_and_out(start, start + length - 1);
         cut->attach(filter);
     }
+    ScaleRegistration registration;
     QJsonArray boxes;
     QImage reference, first, last;
     for (int i = 0; i < length; ++i) {
@@ -118,7 +120,25 @@ int main(int argc, char **argv)
         if (i == length - 1) last = image;
         if (tracking) {
             const char *key = filter.get("results") && *filter.get("results") ? "results" : "_results";
-            const auto r = filter.anim_get_rect(key, start + i, start + length);
+            auto r = filter.anim_get_rect(key, start + i, start + length);
+            QRectF registered;
+            if (i == 0) {
+                const auto seed = input.value("box").toArray();
+                r.x = seed[0].toDouble() * w;
+                r.y = seed[1].toDouble() * h;
+                r.w = seed[2].toDouble() * w;
+                r.h = seed[3].toDouble() * h;
+                if (!registration.initialize(image, QRectF(r.x, r.y, r.w, r.h))) return 5;
+            } else {
+                if (!registration.update(image, QRectF(r.x, r.y, r.w, r.h), registered)) {
+                    std::fprintf(stderr, "Track rejected at sample %d (scale registration)\n", i);
+                    return 5;
+                }
+                r.x = registered.x();
+                r.y = registered.y();
+                r.w = registered.width();
+                r.h = registered.height();
+            }
             if (r.w < 4 || r.h < 4 || r.x < 0 || r.y < 0 || r.x + r.w > w || r.y + r.h > h) return 5;
             const auto current = patch(image, r);
             if (i == 0) reference = current;
