@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Montaz contributors
 """Provider failures stay precise, terminal, and free of private response text."""
 
+import io
 import json
 import unittest
 from unittest.mock import Mock, patch
@@ -124,6 +125,34 @@ class GeminiTests(unittest.TestCase):
                 with self.assertRaises(AssistantError) as failure:
                     Gemini("private-key").generate([])
                 self.assertEqual(str(failure.exception), code)
+
+    def test_invalid_key_reported_as_http_400_is_an_auth_failure(self):
+        # Gemini answers a wrong key with 400 INVALID_ARGUMENT/API_KEY_INVALID.
+        for reason, code in (
+            ("API_KEY_INVALID", "provider_auth"),
+            ("FIELD_INVALID", "provider_request_rejected"),
+        ):
+            body = json.dumps(
+                {
+                    "error": {
+                        "code": 400,
+                        "message": "private provider text",
+                        "status": "INVALID_ARGUMENT",
+                        "details": [{"reason": reason, "domain": "googleapis.com"}],
+                    }
+                }
+            ).encode()
+            with (
+                self.subTest(reason=reason),
+                patch(
+                    "urllib.request.urlopen",
+                    side_effect=HTTPError("u", 400, "Bad", {}, io.BytesIO(body)),
+                ),
+                self.assertRaises(AssistantError) as failure,
+            ):
+                Gemini("private-key").generate([])
+            self.assertEqual(failure.exception.code, code)
+            self.assertNotIn("private", str(failure.exception))
 
 
 if __name__ == "__main__":

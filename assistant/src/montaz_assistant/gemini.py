@@ -19,6 +19,17 @@ class AssistantError(ValueError):
         super().__init__(code)
 
 
+def _invalid_key(error: urllib.error.HTTPError) -> bool:
+    """Gemini reports a wrong API key as HTTP 400; the body is read only for its reason."""
+    try:
+        details = decode(error.read(64 * 1024))["error"]["details"]
+        return any(
+            type(d) is dict and d.get("reason") == "API_KEY_INVALID" for d in details
+        )
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return False
+
+
 class Gemini:
     def __init__(self, key: str, model: str = "gemini-3.8-flash"):
         if not isinstance(key, str) or not key.strip():
@@ -70,7 +81,7 @@ class Gemini:
         except urllib.error.HTTPError as exc:
             code = (
                 "provider_auth"
-                if exc.code in (401, 403)
+                if exc.code in (401, 403) or (exc.code == 400 and _invalid_key(exc))
                 else "provider_request_rejected"
                 if exc.code == 400
                 else "provider_unavailable"

@@ -22,6 +22,7 @@ from montaz_assistant.captions import is_silent, propose_captions
 from montaz_assistant.contracts import Asset, FrameRate, OccupiedRange, Snapshot, Track
 from montaz_assistant.gemini import AssistantError
 from montaz_assistant.planning import MediaTools
+from montaz_assistant.timing import refine
 
 SR = 8000  # beats.SAMPLE_RATE: the decoder's band-split output rate.
 LABELLED = {
@@ -278,6 +279,89 @@ class BeatRegressionTests(unittest.TestCase):
                         self.assertLessEqual(nearest, 1 / (2 * fps) + Fraction(1, 100))
                     expected = sum(1 for t in pulse if 0 < round(t * fps) < duration)
                     self.assertGreaterEqual(len(frames), expected - 1)
+
+    def test_retimed_cuts_land_on_kicks_under_audible_music_within_handles(self):
+        # End to end: decoded music audible from its first sample -> beat frames
+        # -> refined cuts. Handles of 0, 3 and 30 frames bound each move.
+        pulse = grid(120, 12)
+        raw = render(12, [(t, "kick", 16000) for t in pulse], pad=2500)
+        for rate in (
+            FrameRate(24000, 1001),
+            FrameRate(25),
+            FrameRate(30000, 1001),
+            FrameRate(60000, 1001),
+        ):
+            fps = Fraction(rate.numerator, rate.denominator)
+            total = math.floor(11 * fps)
+            # Cuts about a third of a beat away from the nearest kick.
+            bounds = [0] + [math.floor((t + 0.17) * fps) for t in pulse[3:21:4]]
+            bounds.append(total)
+            handles = (0, 3, 30, 0, 3, 30)
+            clips, assets, occupied = [], [], []
+            for i, (start, end) in enumerate(zip(bounds, bounds[1:])):
+                assets.append(Asset(str(i), 5 + end - start + handles[i]))
+                clips.append(
+                    dict(
+                        instance_id=f"c{i}",
+                        bin_id=str(i),
+                        track_id="v",
+                        start_frame=start,
+                        in_frame=5,
+                        duration_frames=end - start,
+                    )
+                )
+                occupied.append(OccupiedRange(f"c{i}", "v", start, end - start))
+            snapshot = Snapshot(
+                "p",
+                "s",
+                1,
+                rate,
+                (*assets, Asset("m", total, False, True)),
+                (Track("v", "video"), Track("a", "audio")),
+                (*occupied, OccupiedRange("music", "a", 0, total)),
+            )
+            media = MediaTools()
+            media._output = Mock(return_value=raw)
+            with self.subTest(fps=str(fps)), tempfile.TemporaryDirectory() as cache:
+                music = Path(cache) / "music.wav"
+                music.write_bytes(b"synthetic music")
+                sha = hashlib.sha256(music.read_bytes()).hexdigest()
+                result = analyze(music, rate, total, sha, Path(cache), media)
+                self.assertEqual(result["mode"], "beats")
+                proposal = refine(
+                    snapshot,
+                    "r",
+                    dict(
+                        clips=clips,
+                        music=dict(path=str(music), sha256=sha, instance_id="music"),
+                        max_shift_frames=max(
+                            1, rate.numerator // (4 * rate.denominator)
+                        ),
+                    ),
+                    result["beats"],
+                )
+                operations = proposal["operations"]
+                self.assertEqual(sum(o["duration_frames"] for o in operations), total)
+                moved = 0
+                for before, after, asset in zip(clips, operations, assets):
+                    self.assertLessEqual(
+                        after["in_frame"] + after["duration_frames"],
+                        asset.duration_frames,
+                    )
+                    self.assertGreaterEqual(after["duration_frames"], math.ceil(fps))
+                for before, after in zip(clips[1:], operations[1:]):
+                    if after["start_frame"] == before["start_frame"]:
+                        continue
+                    moved += 1
+                    nearest = min(
+                        abs(
+                            Fraction(after["start_frame"]) / fps
+                            - Fraction(t).limit_denominator(1000)
+                        )
+                        for t in pulse
+                    )
+                    self.assertLessEqual(nearest, 1 / (2 * fps) + Fraction(1, 100))
+                self.assertGreaterEqual(moved, 3)
 
 
 def tone(dbfs, kind="noise", seconds=1.0) -> bytes:

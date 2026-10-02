@@ -7,6 +7,7 @@
 #include "workerclient.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -16,6 +17,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUuid>
+
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#endif
 
 namespace {
 QJsonObject snapshot()
@@ -312,9 +318,16 @@ private Q_SLOTS:
         QCOMPARE(Montaz::chatCommand(QStringLiteral("Can you apply a match cut between these two clips?")).action, ChatAction::MatchCut);
         QCOMPARE(Montaz::chatCommand(QStringLiteral("Add background music")).action, ChatAction::Music);
         QCOMPARE(Montaz::chatCommand(QStringLiteral("suggest sound effects")).action, ChatAction::SoundSuggestions);
-        for (const auto &message : {QStringLiteral("Don't add match cuts"), QStringLiteral("Explain match cuts"),
-                                    QStringLiteral("Align cuts and make a longer edit"), QStringLiteral("Create a travel edit with no sound effects"),
-                                    QStringLiteral("Suggest sounds\nand change all my clips"), QStringLiteral("Add music and apply match cuts")}) {
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("Add music please")).action, ChatAction::Music);
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("add background music to the video")).action, ChatAction::Music);
+        for (const auto &message :
+             {QStringLiteral("Add captions"), QStringLiteral("generate subtitles for the speech"), QStringLiteral("Can you add captions to this video?")})
+            QCOMPARE(Montaz::chatCommand(message).action, ChatAction::Captions);
+        for (const auto &message :
+             {QStringLiteral("Don't add match cuts"), QStringLiteral("Explain match cuts"), QStringLiteral("Align cuts and make a longer edit"),
+              QStringLiteral("Create a travel edit with no sound effects"), QStringLiteral("Suggest sounds\nand change all my clips"),
+              QStringLiteral("Add music and apply match cuts"), QStringLiteral("Don't add captions"), QStringLiteral("Add captions and music"),
+              QStringLiteral("Add music to the beach scenes")}) {
             QCOMPARE(Montaz::chatCommand(message).action, ChatAction::Edit);
         }
     }
@@ -330,8 +343,13 @@ private Q_SLOTS:
         QCOMPARE(simple.description, QStringLiteral("quiet footsteps"));
         QCOMPARE(simple.seconds, 2.0);
         QCOMPARE(Montaz::chatCommand(QStringLiteral("add a .5 second sound of a click")).seconds, 0.5);
+        const auto polite = Montaz::chatCommand(QStringLiteral("Add a sound of seagulls, please"));
+        QCOMPARE(polite.action, ChatAction::SoundEffect);
+        QCOMPARE(polite.description, QStringLiteral("seagulls"));
         for (const auto &message : {QStringLiteral("add a 11 second sound of a click"), QStringLiteral("add a 0 second sound of a click"),
-                                    QStringLiteral("add a -1 second sound of a click"), QStringLiteral("add sound: ") + QString(1001, 'a')})
+                                    QStringLiteral("add a -1 second sound of a click"), QStringLiteral("add sound: ") + QString(1001, 'a'),
+                                    QStringLiteral("Add a sound"), QStringLiteral("add a sound effect."), QStringLiteral("Add sound:"),
+                                    QStringLiteral("add a sound of"), QStringLiteral("add a 3 second sound for")})
             QCOMPARE(Montaz::chatCommand(message).action, ChatAction::InvalidSound);
     }
     void unavailableTransitionsDoNotStartAnEditingBrief()
@@ -542,6 +560,70 @@ time.sleep(10)
         client.stop();
         QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
         QCOMPARE(ready.count(), 0);
+    }
+    void runLogsAreBoundedWithoutTouchingOtherFiles()
+    {
+        const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+        QVERIFY(QDir().mkpath(directory));
+        const auto old = QDateTime::currentDateTimeUtc().addDays(-30);
+        for (int i = 0; i < Montaz::WorkerClient::MaxRunLogs + 20; ++i) {
+            QFile file(directory + QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".jsonl"));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("{}\n");
+            file.setFileTime(old.addSecs(i), QFileDevice::FileModificationTime);
+        }
+        for (const auto &name : {QStringLiteral("notes.jsonl"), QStringLiteral("notes.txt")}) {
+            QFile file(directory + name);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.setFileTime(old.addDays(-1), QFileDevice::FileModificationTime);
+        }
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), qEnvironmentVariable("MONTAZ_TEST_SOURCE"));
+        QVERIFY(client.start(snapshot()));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 5000);
+        const auto logs = QDir(directory).entryList({QStringLiteral("*-*-*-*-*.jsonl")}, QDir::Files);
+        QCOMPARE(logs.size(), Montaz::WorkerClient::MaxRunLogs);
+        QVERIFY(QFile::exists(directory + QStringLiteral("notes.jsonl")));
+        QVERIFY(QFile::exists(directory + QStringLiteral("notes.txt")));
+    }
+    void stopAndDestructionReachWorkerMediaChildren()
+    {
+#ifdef Q_OS_UNIX
+        // 0: worker exits on SIGTERM; 1: worker ignores SIGTERM until killed; 2: client destroyed while busy.
+        for (int mode = 0; mode < 3; ++mode) {
+            QTemporaryDir temp;
+            auto script = QByteArray(R"PY(import json,signal,subprocess,sys,time
+r=json.loads(sys.stdin.readline())
+def send(x): print(json.dumps({'version':1,**x}),flush=True)
+send({'type':'ready'})
+for n in (1,2): send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'planner','status':'running','reason':''})
+child=subprocess.Popen([sys.executable,'-c','import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)'])
+open('PIDFILE','w').write(str(child.pid))
+MODE
+time.sleep(60)
+)PY");
+            script.replace("PIDFILE", (temp.path() + QStringLiteral("/child.pid")).toUtf8());
+            script.replace("MODE", mode == 1 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN)" : "pass");
+            fakeWorker(temp.path(), script);
+            QFile pidFile(temp.path() + QStringLiteral("/child.pid"));
+            {
+                Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+                QSignalSpy stopped(&client, &Montaz::WorkerClient::stopped);
+                QVERIFY(client.start(snapshot()));
+                QTRY_VERIFY_WITH_TIMEOUT(pidFile.exists() && pidFile.size() > 0, 5000);
+                if (mode < 2) {
+                    client.stop();
+                    QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
+                    QVERIFY(!client.busy());
+                }
+            }
+            QVERIFY(pidFile.open(QIODevice::ReadOnly));
+            const int pid = pidFile.readAll().toInt();
+            QVERIFY(pid > 0);
+            QTRY_VERIFY2_WITH_TIMEOUT(::kill(pid, 0) != 0, qPrintable(QStringLiteral("mode %1 child %2").arg(mode).arg(pid)), 3000);
+        }
+#else
+        QSKIP("Process groups are POSIX-only");
+#endif
     }
     void captionsBindAudioSourceNativeIntervalsAndSafeText()
     {

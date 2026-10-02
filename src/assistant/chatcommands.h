@@ -5,7 +5,7 @@
 #include <QString>
 
 namespace Montaz {
-enum class ChatAction { Edit, Music, SoundSuggestions, SoundEffect, BeatCuts, MatchCut, UnavailableTransition, InvalidSound };
+enum class ChatAction { Edit, Music, SoundSuggestions, SoundEffect, BeatCuts, MatchCut, Captions, UnavailableTransition, InvalidSound };
 struct ChatCommand
 {
     ChatAction action{ChatAction::Edit};

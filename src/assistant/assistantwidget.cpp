@@ -234,6 +234,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                 reply(i18n("Gemini rejected its configuration. Check your API key and model. No captions were applied."));
             else if (code == QStringLiteral("provider_timeout") || code == QStringLiteral("worker_timeout") || code == QStringLiteral("media_timeout"))
                 reply(i18n("Caption recognition timed out. No captions were applied; completed speech results are kept for reuse."));
+            else if (code.startsWith(QStringLiteral("provider_")) || code == QStringLiteral("invalid_model_response"))
+                reply(i18n("Gemini is unavailable, rate limited or could not answer. No captions were applied; completed speech results are kept for reuse."));
             else
                 reply(i18n("Captions could not be prepared. Check source audio and Run logs. No captions were applied."));
             return;
@@ -247,6 +249,9 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                 reply(i18n("Gemini rejected its configuration. Check the API key and model in your assistant settings. No sound was generated."));
             else if (code == QStringLiteral("provider_timeout") || code == QStringLiteral("worker_timeout") || code == QStringLiteral("media_timeout"))
                 reply(i18n("Sound suggestions timed out. No sound was generated or applied. Cached visual evidence remains available."));
+            else if (code.startsWith(QStringLiteral("provider_")) || code == QStringLiteral("invalid_model_response"))
+                reply(i18n(
+                    "Gemini is unavailable, rate limited or could not answer. No sound was generated or applied. Cached visual evidence remains available."));
             else
                 reply(i18n("Sound suggestions could not finish. No sound was generated or applied. Check Run logs before trying again."));
             return;
@@ -276,7 +281,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             else if (code == QStringLiteral("music_timeout") || code == QStringLiteral("worker_timeout"))
                 reply(i18n("Music generation timed out. No audio was applied; completed music remains available for reuse."));
             else if (code == QStringLiteral("invalid_music_audio"))
-                reply(i18n("The generated audio failed duration or sound checks. No audio was applied. Completed provider output is kept for a local retry."));
+                reply(i18n("The generated music was too short or silent, so it was not kept. No audio was applied; trying again requests new music."));
             else
                 reply(i18n("Music could not be prepared. Check ElevenLabs availability and credits, then try again. No audio was applied."));
             return;
@@ -808,11 +813,15 @@ void Montaz::AssistantWidget::submitMessage(const QString &message)
     case ChatAction::MatchCut:
         matchCut();
         return;
+    case ChatAction::Captions:
+        generateCaptions();
+        return;
     case ChatAction::UnavailableTransition:
         reply(i18n("That transition is not available yet. Beat-synced cuts and Match cut are available from Transitions."));
         return;
     case ChatAction::InvalidSound:
-        reply(i18n("Describe one sound in up to 1,000 characters, with a duration from 0.5 to 10 seconds."));
+        reply(i18n("Describe one sound in up to 1,000 characters, with a duration from 0.5 to 10 seconds, for example “add a 2 second sound of "
+                   "gentle waves”. Or ask me to “suggest sounds” for the current edit."));
         return;
     case ChatAction::Edit:
         planEdit(message);
@@ -1123,14 +1132,22 @@ void Montaz::AssistantWidget::generateCaptions()
 void Montaz::AssistantWidget::changeCaptionStyle(const QString &preset)
 {
     if (m_worker->busy()) return;
-    clearProposal();
-    finishTasks(i18n("Superseded"));
+    const auto before = m_adapter->snapshot();
     m_applying = true;
     const auto result = m_adapter->captionStyle(preset);
     m_applying = false;
-    reply(result.isEmpty() ? i18n("Caption appearance updated. Text and timing are preserved; Undo restores the previous appearance. Original restores each "
-                                  "caption’s saved style.")
-                           : i18n("Add captions and enable and unlock their track before changing the style."));
+    if (!result.isEmpty()) {
+        // Nothing changed: a pending review, such as unapplied captions, stays available.
+        reply(!m_captionReview.isEmpty() ? i18n("Apply the proposed captions first, then choose a caption style. The proposal is still available.")
+                                         : i18n("Add captions and enable and unlock their track before changing the style."));
+        return;
+    }
+    if (m_adapter->snapshot() != before) {
+        clearProposal();
+        finishTasks(i18n("Superseded"));
+    }
+    reply(i18n("Caption appearance updated. Text and timing are preserved; Undo restores the previous appearance. Original restores each "
+               "caption’s saved style."));
 }
 
 void Montaz::AssistantWidget::matchCut()

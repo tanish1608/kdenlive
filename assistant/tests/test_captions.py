@@ -1,13 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Montaz contributors
 import hashlib
+import random
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
-from montaz_assistant.captions import caption_spec, propose_captions, validate_segments
+from montaz_assistant.captions import (
+    caption_spec,
+    map_segments,
+    propose_captions,
+    validate_segments,
+)
 from montaz_assistant.contracts import Asset, FrameRate, OccupiedRange, Snapshot, Track
 from montaz_assistant.gemini import AssistantError
 from montaz_assistant.planning import MediaTools
@@ -130,6 +136,98 @@ class CaptionTests(unittest.TestCase):
             ],
             181,
         )
+
+    def test_long_phrases_crowding_the_last_frame_stay_separate_and_inside(self):
+        # Phrases that quantize into the clip's final frame cannot be combined
+        # within 84 characters; earlier spare frames keep every phrase.
+        for rate in (
+            FrameRate(24000, 1001),
+            FrameRate(30000, 1001),
+            FrameRate(60000, 1001),
+        ):
+            length = 3 * rate.numerator // rate.denominator
+            end_ms = length * rate.denominator * 1000 // rate.numerator
+            segments = [
+                dict(start_ms=0, end_ms=end_ms - 30, text="a" * 60),
+                dict(start_ms=end_ms - 3, end_ms=end_ms - 2, text="b" * 60),
+                dict(start_ms=end_ms - 2, end_ms=end_ms - 1, text="c" * 60),
+                dict(start_ms=end_ms - 1, end_ms=end_ms, text="d" * 60),
+            ]
+            snapshot = replace(
+                self.snapshot,
+                frame_rate=rate,
+                assets=(Asset("1", 1000, False, True),),
+                occupied=(OccupiedRange("spoken", "2", 500, length),),
+            )
+            clip = {
+                **self.spec["clips"][0],
+                "start_frame": 500,
+                "in_frame": 211,
+                "duration_frames": length,
+            }
+            self.media._output.return_value = b"\0\x10" * (
+                length * rate.denominator * 16000 // rate.numerator
+            )
+            self.provider.generate.return_value = dict(segments=segments)
+            with self.subTest(rate=rate):
+                captions = self.propose(
+                    snapshot=snapshot,
+                    raw_spec=dict(clips=[clip]),
+                    cache=self.root / f"crowded{rate.numerator}",
+                )["captions"]
+                self.assertEqual(
+                    [c["text"] for c in captions], [s["text"] for s in segments]
+                )
+                self.assertEqual(
+                    [c["start_frame"] + c["duration_frames"] for c in captions][-3:],
+                    [500 + length - 2, 500 + length - 1, 500 + length],
+                )
+                for before, after in zip(captions, captions[1:]):
+                    self.assertLessEqual(
+                        before["start_frame"] + before["duration_frames"],
+                        after["start_frame"],
+                    )
+                self.assertTrue(all(c["duration_frames"] >= 1 for c in captions))
+                argv = self.media._output.call_args.args[0]
+                self.assertAlmostEqual(
+                    float(argv[argv.index("-ss") + 1]),
+                    211 * rate.denominator / rate.numerator,
+                )
+
+    def test_representable_transcripts_keep_every_word_in_bounded_order(self):
+        rng = random.Random(3)
+        words = "we made it to the beach the water is warm look at that".split()
+        for _ in range(3000):
+            rate = rng.choice(
+                (FrameRate(24000, 1001), FrameRate(30000, 1001), FrameRate(60000, 1001))
+            )
+            length = rng.randint(1, 120)
+            duration_ms = length * rate.denominator * 16000 // rate.numerator // 16
+            segments, cursor = [], rng.choice((0, max(0, duration_ms - 60)))
+            while len(segments) < min(length, 8) and cursor < duration_ms:
+                start = cursor + rng.choice((0, rng.randint(0, 400)))
+                end = min(duration_ms, start + rng.choice((1, rng.randint(1, 3000))))
+                if end <= start:
+                    break
+                text = " ".join(rng.choices(words, k=rng.randint(1, 12)))[:84].strip()
+                segments.append(dict(start_ms=start, end_ms=end, text=text))
+                cursor = end
+            if not segments:
+                continue
+            validate_segments(dict(segments=segments), duration_ms)
+            clip = dict(
+                instance_id="c", start_frame=rng.choice((0, 37)), duration_frames=length
+            )
+            captions = map_segments(segments, clip, rate)
+            self.assertEqual(
+                [c["text"] for c in captions], [s["text"] for s in segments]
+            )
+            previous = clip["start_frame"]
+            for c in captions:
+                self.assertGreaterEqual(c["start_frame"], previous)
+                self.assertGreaterEqual(c["duration_frames"], 1)
+                previous = c["start_frame"] + c["duration_frames"]
+            self.assertLessEqual(previous, clip["start_frame"] + length)
 
     def test_model_and_audio_change_invalidate_cached_recognition(self):
         self.propose()

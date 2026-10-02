@@ -154,40 +154,35 @@ def is_silent(pcm):
 
 def map_segments(segments, clip, rate):
     """Keep all recognised words in ordered, nonempty native frame intervals."""
-    mapped = []
     num, den = rate.numerator, rate.denominator * 1000
+    length = clip["duration_frames"]
+    texts = [caption_text(s["text"]) for s in segments]
+    if len(segments) > length:
+        # Fewer frames than phrases: combine the trailing phrases only when the
+        # existing text/line constraints still hold.
+        texts[length - 1 :] = [caption_text(" ".join(texts[length - 1 :]))]
+        segments = segments[: len(texts)]
+    spans, previous = [], 0
     for segment in segments:
-        start = segment["start_ms"] * num // den
-        end = min(clip["duration_frames"], (segment["end_ms"] * num + den - 1) // den)
-        previous = (
-            mapped[-1]["start_frame"]
-            + mapped[-1]["duration_frames"]
-            - clip["start_frame"]
-            if mapped
-            else 0
+        start = max(segment["start_ms"] * num // den, previous)
+        end = max(start + 1, min(length, (segment["end_ms"] * num + den - 1) // den))
+        spans.append([start, end])
+        previous = end
+    # Phrases crowded into the final frames move earlier, never past the clip.
+    limit = length
+    for span in reversed(spans):
+        span[1] = min(span[1], limit)
+        span[0] = min(span[0], span[1] - 1)
+        limit = span[0]
+    return [
+        dict(
+            instance_id=clip["instance_id"],
+            start_frame=clip["start_frame"] + start,
+            duration_frames=end - start,
+            text=text,
         )
-        start = max(start, previous)
-        if end <= start:
-            if start < clip["duration_frames"]:
-                end = start + 1
-            elif mapped:
-                # At the clip boundary there is no spare frame. Combine words
-                # only when the existing text/line constraints still hold.
-                mapped[-1]["text"] = caption_text(
-                    mapped[-1]["text"] + " " + segment["text"]
-                )
-                continue
-            else:
-                raise AssistantError("invalid_captions")
-        mapped.append(
-            dict(
-                instance_id=clip["instance_id"],
-                start_frame=clip["start_frame"] + start,
-                duration_frames=end - start,
-                text=caption_text(segment["text"]),
-            )
-        )
-    return mapped
+        for (start, end), text in zip(spans, texts)
+    ]
 
 
 def propose_captions(

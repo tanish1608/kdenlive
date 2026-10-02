@@ -106,6 +106,16 @@ class NativeMatchTrackerTests(unittest.TestCase):
                 )
             self.assertEqual(caught.exception.code, "tracking_unavailable")
 
+    def test_subject_shrinking_below_the_minimum_rejects_only_this_candidate(self):
+        # Width falls from 5.3% to about 3% of the frame: the helper must reject
+        # the candidate (tracking_unavailable), not emit boxes Python refuses.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "shrinking.mp4"
+            make_fixture(path, center=60, radius=12, growth=-0.12)
+            with self.assertRaises(AssistantError) as caught:
+                native_frames(path, 30, 30, SPEC, RATE, MediaTools(), seed(90, 8.4))
+            self.assertEqual(caught.exception.code, "tracking_unavailable")
+
 
 RATE, SPEC = FrameRate(30000, 1001), dict(width=1920, height=1080)
 

@@ -15,6 +15,11 @@
 #include <QStandardPaths>
 #include <QUuid>
 
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#include <unistd.h>
+#endif
+
 Montaz::WorkerClient::WorkerClient(QString python, QString sourceDirectory, QObject *parent, int deadlineMs)
     : QObject(parent)
     , m_python(std::move(python))
@@ -26,9 +31,11 @@ Montaz::WorkerClient::WorkerClient(QString python, QString sourceDirectory, QObj
     m_killTimer.setSingleShot(true);
     m_killTimer.setInterval(750);
     connect(&m_deadline, &QTimer::timeout, this, [this]() { abort(QStringLiteral("worker_timeout")); });
-    connect(&m_killTimer, &QTimer::timeout, this, [this]() {
-        if (m_process.state() != QProcess::NotRunning) m_process.kill();
-    });
+#ifdef Q_OS_UNIX
+    // The worker leads its own process group, so Stop also reaches its media children.
+    m_process.setChildProcessModifier([]() { ::setpgid(0, 0); });
+#endif
+    connect(&m_killTimer, &QTimer::timeout, this, [this]() { signalWorker(true); });
     connect(&m_process, &QProcess::readyReadStandardOutput, this, &WorkerClient::readOutput);
     // No provider logs yet. Do not expose arbitrary stderr to the UI or protocol.
     connect(&m_process, &QProcess::readyReadStandardError, this, [this]() { m_process.readAllStandardError(); });
@@ -45,7 +52,7 @@ Montaz::WorkerClient::~WorkerClient()
 {
     disconnect(&m_process, nullptr, this, nullptr);
     if (m_process.state() != QProcess::NotRunning) {
-        m_process.kill();
+        signalWorker(true);
         m_process.waitForFinished(1000);
     }
 }
@@ -60,6 +67,13 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     const auto cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     const auto logDirectory = cache + QStringLiteral("/montaz/runs");
     m_logPath = !cache.isEmpty() && QDir().mkpath(logDirectory) ? logDirectory + QLatin1Char('/') + m_requestId + QStringLiteral(".jsonl") : QString();
+    if (!m_logPath.isEmpty()) {
+        // Keep the newest run logs only; never touch files this client did not name.
+        const QRegularExpression runLog(QStringLiteral("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jsonl$"));
+        int kept = 0;
+        for (const auto &entry : QDir(logDirectory).entryInfoList({QStringLiteral("*.jsonl")}, QDir::Files, QDir::Time))
+            if (runLog.match(entry.fileName()).hasMatch() && ++kept >= MaxRunLogs) QFile::remove(entry.absoluteFilePath());
+    }
     m_proposal = {};
     m_review = {};
     m_soundtrack = {};
@@ -174,6 +188,7 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_deadline.start(m_matchRequest ? 90000 : m_mediaRequest || m_musicRequest || m_cueRequest || m_captionRequest ? 180000 : m_defaultDeadline);
     Q_EMIT busyChanged(true);
     m_process.start();
+    m_processGroup = m_process.processId();
     m_process.write(line);
     m_process.closeWriteChannel();
     return true;
@@ -190,7 +205,7 @@ void Montaz::WorkerClient::stop()
     m_captionReview = {};
     m_matchReview = {};
     m_deadline.stop();
-    m_process.terminate();
+    signalWorker(false);
     m_killTimer.start();
 }
 
@@ -205,8 +220,20 @@ void Montaz::WorkerClient::abort(const QString &code)
     m_captionReview = {};
     m_matchReview = {};
     m_deadline.stop();
-    m_process.terminate();
+    signalWorker(false);
     m_killTimer.start();
+}
+
+void Montaz::WorkerClient::signalWorker(bool kill)
+{
+    if (m_process.state() == QProcess::NotRunning) return;
+#ifdef Q_OS_UNIX
+    if (m_processGroup > 0) ::kill(-m_processGroup, kill ? SIGKILL : SIGTERM);
+#endif
+    if (kill)
+        m_process.kill();
+    else
+        m_process.terminate();
 }
 
 void Montaz::WorkerClient::readOutput()
@@ -546,6 +573,12 @@ void Montaz::WorkerClient::readOutput()
 
 void Montaz::WorkerClient::finish(int exitCode, QProcess::ExitStatus exitStatus)
 {
+#ifdef Q_OS_UNIX
+    // Media children that outlive the worker are stopped with it. Its group ID stays
+    // reserved while any member lives; PIDs are not reused within this call.
+    if (m_processGroup > 0) ::kill(-m_processGroup, SIGKILL);
+#endif
+    m_processGroup = 0;
     if (!m_busy) return;
     readOutput();
     m_deadline.stop();

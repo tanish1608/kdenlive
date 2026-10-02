@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 import wave
 from array import array
+from contextlib import contextmanager
 from pathlib import Path
 
 from .gemini import AssistantError
@@ -245,11 +246,12 @@ def compose_music(snapshot, request_id: str, raw_spec, provider, media, progress
                 "pcm_s16le",
                 str(target),
             ]
-            media._output(arguments)
             # MP3 music can end one codec block early. Only a shortfall of at
             # most one project frame may be padded; never stretch a short track.
             tolerance = snapshot.frame_rate.denominator / snapshot.frame_rate.numerator
-            _validate_wave(target, seconds, tolerance)
+            with unusable_provider_audio(raw_path):
+                media._output(arguments)
+                _validate_wave(target, seconds, tolerance)
             prepared = Path(temporary) / "prepared.wav"
             media._output(
                 [
@@ -274,10 +276,12 @@ def compose_music(snapshot, request_id: str, raw_spec, provider, media, progress
             media.check()
             prepared.chmod(0o600)
             os.replace(prepared, cached_path)
-    _validate_wave(cached_path, seconds)
+    with unusable_provider_audio(cached_path):
+        _validate_wave(cached_path, seconds)
     media.check()
     progress("measurement", reused)
-    measurements = measure(cached_path, snapshot.frame_rate, spec["duration_frames"], media)
+    with unusable_provider_audio(cached_path, raw_path):
+        measurements = measure(cached_path, snapshot.frame_rate, spec["duration_frames"], media)
     media.check()
     # Exclusive creation: a cancelled/replayed request cannot overwrite an asset.
     sha = hashlib.sha256()
@@ -301,6 +305,22 @@ def compose_music(snapshot, request_id: str, raw_spec, provider, media, progress
         "accents": measurements["accents"],
         "cached": reused,
     }
+
+
+@contextmanager
+def unusable_provider_audio(*paths: Path):
+    """Discard provider audio that decodes too short or silent.
+
+    Reusing it could never succeed, so the next explicit request generates
+    again. Encoder failures, timeouts and Stop keep the paid output.
+    """
+    try:
+        yield
+    except AssistantError as exc:
+        if exc.code == "invalid_music_audio":
+            for path in paths:
+                path.unlink(missing_ok=True)
+        raise
 
 
 def _validate_wave(path: Path, expected_seconds: float, maximum_shortfall: float = 1 / 48000):
