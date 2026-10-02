@@ -212,7 +212,9 @@ class EffectTests(unittest.TestCase):
             with self.subTest(index=index):
                 with self.assertRaises(AssistantError):
                     self.compose(dict(spec, path=str(self.root / f"bad{index}.wav")))
-                result = self.compose(dict(spec, path=str(self.root / f"good{index}.wav")))
+                result = self.compose(
+                    dict(spec, path=str(self.root / f"good{index}.wav"))
+                )
                 self.assertFalse(result["cached"])
                 self.assertEqual(self.provider.compose.call_count, 2)
 
