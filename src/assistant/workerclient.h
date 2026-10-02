@@ -35,6 +35,7 @@ Q_SIGNALS:
 private:
     void readOutput();
     void abort(const QString &code);
+    void signalWorker(bool kill);
     void finish(int exitCode, QProcess::ExitStatus exitStatus);
     void record(const QString &type, const QJsonObject &details = {});
     QProcess m_process;
@@ -71,6 +72,7 @@ private:
     int m_sequence{0};
     int m_outputBytes{0};
     int m_defaultDeadline;
+    qint64 m_processGroup{0};
     int m_progressCompleted{0};
     int m_progressCached{0};
     bool m_mediaRequest{false};

@@ -17,6 +17,10 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#endif
+
 namespace {
 QJsonObject snapshot()
 {
@@ -542,6 +546,46 @@ time.sleep(10)
         client.stop();
         QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
         QCOMPARE(ready.count(), 0);
+    }
+    void stopAndDestructionReachWorkerMediaChildren()
+    {
+#ifdef Q_OS_UNIX
+        // 0: worker exits on SIGTERM; 1: worker ignores SIGTERM until killed; 2: client destroyed while busy.
+        for (int mode = 0; mode < 3; ++mode) {
+            QTemporaryDir temp;
+            auto script = QByteArray(R"PY(import json,signal,subprocess,sys,time
+r=json.loads(sys.stdin.readline())
+def send(x): print(json.dumps({'version':1,**x}),flush=True)
+send({'type':'ready'})
+for n in (1,2): send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'planner','status':'running','reason':''})
+child=subprocess.Popen([sys.executable,'-c','import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)'])
+open('PIDFILE','w').write(str(child.pid))
+MODE
+time.sleep(60)
+)PY");
+            script.replace("PIDFILE", (temp.path() + QStringLiteral("/child.pid")).toUtf8());
+            script.replace("MODE", mode == 1 ? "signal.signal(signal.SIGTERM,signal.SIG_IGN)" : "pass");
+            fakeWorker(temp.path(), script);
+            QFile pidFile(temp.path() + QStringLiteral("/child.pid"));
+            {
+                Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+                QSignalSpy stopped(&client, &Montaz::WorkerClient::stopped);
+                QVERIFY(client.start(snapshot()));
+                QTRY_VERIFY_WITH_TIMEOUT(pidFile.exists() && pidFile.size() > 0, 5000);
+                if (mode < 2) {
+                    client.stop();
+                    QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
+                    QVERIFY(!client.busy());
+                }
+            }
+            QVERIFY(pidFile.open(QIODevice::ReadOnly));
+            const int pid = pidFile.readAll().toInt();
+            QVERIFY(pid > 0);
+            QTRY_VERIFY2_WITH_TIMEOUT(::kill(pid, 0) != 0, qPrintable(QStringLiteral("mode %1 child %2").arg(mode).arg(pid)), 3000);
+        }
+#else
+        QSKIP("Process groups are POSIX-only");
+#endif
     }
     void captionsBindAudioSourceNativeIntervalsAndSafeText()
     {
