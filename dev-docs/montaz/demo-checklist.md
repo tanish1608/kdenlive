@@ -107,11 +107,17 @@ recordings, projects and exports outside Git.
 
 ### D07 — Beat-cut comparison
 
-- [ ] Use the prepared travel sequence/music and current merged beat fix.
-- [ ] Confirm actual cut-to-beat improvement by listening and inspecting cuts.
-  If the result reports energy accents, present it as accent alignment.
-- [ ] Save before/after with the same music, shot order and total duration; allow
-  roughly 40 s and keep audio on during playback.
+- [x] Prepare a seven-shot sequence from the original Goa folder with enough
+  source handles for timing shifts; save separate native before/after projects.
+- [x] Fix the native validator's outdated beat-analysis version. Native application,
+  one Undo/Redo and controlled exports pass. [Evidence](demo-goa-beats.md).
+- [x] Verify all six cuts move 2–4 frames onto detected 60 BPM beat anchors;
+  both exports contain 408 frames, unchanged shot order and identical audio.
+- [x] Save the 13.6136 s standalone reel and labelled side-by-side comparison,
+  `goa-beat-synced.mp4` and `goa-beat-before-after.mp4`, outside Git.
+- [ ] Rehearse audible playback and Zoom audio sharing. The app's Add music
+  attempts failed validation; this example uses a separately prepared ElevenLabs
+  soundtrack. Use the saved export; the macOS render queue also needs a fix.
 
 ### D08 — Interface screenshot and architecture
 
