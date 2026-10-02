@@ -265,7 +265,9 @@ helper now returns actual insertion/removal failures. The assistant batches
 native commands with rollback and commits one Undo only after complete success.
 Subtitle edits invalidate outstanding reviews. Clean/Bold presets use the native
 global force-style property; clearing it restores saved per-event styles without
-recreating events. Empty recognition creates no subtitle model. Recognition and
+recreating events. Original currently clears a pre-existing custom global
+override as well; Undo restores it. Preserving that override is checklist M01.
+Empty recognition creates no subtitle model. Recognition and
 style presets are bounded prototypes; neither establishes word timing accuracy.
 Headless project loading initializes the native subtitle model directly when no
 main window exists; desktop loading retains the existing subtitle editor path.

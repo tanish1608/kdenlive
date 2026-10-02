@@ -294,7 +294,9 @@ helper now propagates add/remove failures so failed batches can roll back.
 use Kdenlive's global subtitle rendering override with one native Undo. They do
 not recreate caption events or change IDs, text or timing. Presets affect all
 current captions; Original clears the override to restore their individual saved
-styles. Refine recognition and timing in Kdenlive's subtitle editor. Animated
+styles. A custom global override set before the assistant is currently cleared
+by Original; Undo restores it. Preserving that override across preset changes
+is an open maintenance item. Refine recognition and timing in Kdenlive's subtitle editor. Animated
 word captions, narrator generation, overlapping/processed audio and forced
 alignment remain future work.
 

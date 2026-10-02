@@ -17,11 +17,59 @@ not establish perceptual quality.
 ## Current priority: maintenance only
 
 The user paused new features on October 2. Claude owns the existing-app bug/quality
-queue [H01–H14](claude-maintenance-handoff.md) while Codex is away. Compatible-shot
+queue [H01–H14](claude-maintenance-handoff.md) was delivered and reviewed. Compatible-shot
 suggestions, quick montage UI, new transitions, recipe wiring and new speech/audio
 modes are on hold. Existing features may be fixed and measured; pending feature
 items below remain recorded rather than removed. Claude delivers local commits
-and its own report; Codex reviews before checking off further master milestones.
+and its own report; Codex checks milestones after independent verification.
+Maintenance merge: `cd4cbda`. [Integration review](maintenance-integration-review.md).
+
+## Reviewed maintenance batch
+
+These statuses cover the assigned fix or audit, not the broader completion gates
+below. Evidence for every row: [Claude report](claude-maintenance-report.md) and
+[independent integration review](maintenance-integration-review.md).
+
+- [x] H01 — POSIX Stop, force-kill and editor-close reach worker children;
+  settled controls checked in the candidate desktop. Commit `cf5247e`.
+- [x] H02 — Real-decoder silence/unavailable-audio negatives. Commit `857045f`.
+  Short audio tails remain M02.
+- [x] H03 — Refused/no-op style changes keep pending captions. Commit `ae66e24`.
+  Custom Original restoration and desktop pending-review checks remain M01.
+- [x] H04 — Crowded caption tails keep phrases within frame bounds. Commit `0d3482c`.
+- [x] H05 — Existing supported apply/Undo failure tests reviewed; generated-audio
+  import/insertion fault injection remains M03. Accepted in merge `cd4cbda`.
+- [x] H06 — Explicit captions and incomplete sounds route correctly; candidate
+  desktop checked. Commit `c43b148`.
+- [x] H07 — Existing Goa evidence/trim audit reviewed; no deterministic defect
+  found. Perceptual ending quality remains Q08. Accepted in merge `cd4cbda`.
+- [x] H08 — Cold/warm, changed, duplicate and corrupt-file cache audit reviewed;
+  separate-worker duplication remains M06. Accepted in merge `cd4cbda`.
+- [x] H09 — Decoded audible-music beat timing regression. Commit `cd7f29d`.
+- [x] H10 — Too-short/silent generated audio evicted for an explicit fresh retry.
+  Commit `962090e`.
+- [x] H11 — Correct provider/key errors and newest-200 run-log retention.
+  Commits `159f632`, `14f3e36`.
+- [x] H12 — 185-frame agreement across native paths at 29.97 and 25 fps;
+  desktop cut-boundary seek checked. Commit `ca86120`. Broader GUI audit remains M05.
+- [x] H13 — Shrinking tracked subject rejects its candidate only. Commit `3d26056`.
+- [ ] H14 — Headless Goa/caption evidence accepted in merge `cd4cbda`; candidate
+  chat/Stop/boundary-seek checks pass. Full desktop caption review/styles and
+  current-tool playback/output acceptance remain pending.
+
+## Next existing-feature fixes
+
+- [ ] M01 — Restore pre-existing custom subtitle force style through Original,
+  Undo/Redo and save/reopen; exercise pending caption review in the desktop. A04.
+- [ ] M02 — Caption available audio in shorter audio streams with truthful
+  unavailable-media handling. A04/A05.
+- [ ] M03 — Fault-test bin-import rollback after failed generated-audio timeline
+  insertion. Q01.
+- [ ] M04 — Redacted diagnostics for unexpected worker exceptions. Q02/Q04.
+- [ ] M05 — Visible needle during continuous playback, zoom/scroll, mixed FPS
+  and existing time remaps. Q05.
+- [ ] M06 — Separate-worker cache deduplication and explicit tracker cache-version
+  maintenance. Q03; single-editor requests are already serialized.
 
 ## Verified foundation
 
@@ -37,8 +85,9 @@ and its own report; Codex reviews before checking off further master milestones.
   loudness preparation and native audio insertion. [Evidence](quality-review.md).
 - [x] F06 — Conservative estimated beat cuts with labelled accent fallback;
   one native Undo. Downbeats/phrases are unfinished. [Evidence](music-timing.md).
-- [x] F07 — Selected-original-audio captions, silence skipping and stable
-  Clean/Bold/Original style changes. [Evidence](quality-review.md).
+- [x] F07 — Selected-original-audio captions, silence skipping and tested
+  Clean/Bold style changes. Original clears the global override; restoring a
+  pre-existing custom override remains M01. [Evidence](quality-review.md).
 - [x] F08 — Selected-pair landmark match cuts, guarded zoom tracking, source
   resolution caps, Compare/Apply/Undo/reopen/export. Perspective, crop and
   landmark precision remain limited. [Evidence](landmark-integration.md).
@@ -137,8 +186,10 @@ Detailed scope, branches and acceptance criteria: [Claude assignment](claude-nex
 - [ ] Q03 — Measure cold/warm analysis and incremental import: unchanged clips
   reuse caches, changed clips invalidate correctly, duplicates avoid redundant
   work and concurrency stays bounded. Record provider/helper counts and latency.
-- [ ] Q04 — Add bounded run-log retention and useful numeric quality/budget
-  diagnostics while preserving redaction; missing/invalid keys fail clearly.
+- [x] Q04 — Newest-200 run-log retention, existing numeric quality/budget
+  diagnostics and clear missing/invalid-key messages. Merge `cd4cbda`, commits
+  `159f632`, `14f3e36`. [Evidence](maintenance-integration-review.md).
+  Unexpected crash diagnostics remain M04.
 - [ ] Q05 — Native monitor/playhead and exported cut-frame audit across mixed
   rates, fractional FPS, new short montages and time remaps. No second player.
 - [ ] Q06 — Complete a silent travel project from import through story/music/
@@ -164,8 +215,9 @@ These do not block the current app milestone and are not assigned for implementa
 ## Execution order
 
 C01–C04 and N01 are integrated; N03a's native contract has synthetic validation.
-Now execute Claude's maintenance H01–H14 and review that branch. New-feature work
-is paused until the user resumes it. The previous feature order remains recorded:
+Claude's maintenance branch is reviewed and merged as `cd4cbda`; finish M01–M06
+and H14's desktop/output acceptance next. New-feature work is paused until the
+user resumes it. The previous feature order remains recorded:
 N02/N03, N04/N05 and N06, measured T01/T02, then T03;
 speech/audio work and Q checks complete the app audit. Claude's independent
 packages may proceed sequentially or in isolated branches in parallel. Neither

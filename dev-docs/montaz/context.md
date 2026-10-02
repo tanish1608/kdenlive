@@ -522,3 +522,27 @@ evidenced maintenance fixes. Native builds must remain isolated. Codex will not
 edit those files concurrently and reviews/merges the delivered local branch later.
 Claude maintains its own H01–H14 report, not the master completion statuses.
 This document prepares delegation; it does not start an external Claude session.
+
+## Maintenance reviewed and integrated — October 2
+
+Claude delivered twelve focused commits through `a05d783`, fixing eight existing
+defects and recording clean audits with tests. Codex inspected the production
+changes and independently reran all 290 Python tests with real tracker/FFmpeg,
+Qt checks (49 + 7), the native build/test and mixed-rate frame QA at 29.97/25 fps.
+The candidate's own desktop also passed empty-sound/caption routing, settled
+no-speech captions, unavailable-transition replies and seeking either side of
+the wheel cut. A private stalled worker confirmed the Stop button and editor
+close terminate both worker and child, including ignored SIGTERM.
+
+Merge `cd4cbda` integrates the branch locally; Claude's worktree/branches remain
+intact. No push, packaging or provider calls were needed for Codex's review.
+[maintenance-integration-review.md](maintenance-integration-review.md) separates
+independent measurements from Claude's live/provider evidence and records limits.
+The master checklist accepts the scoped H01–H13 work; H14 retains full desktop
+caption review/output acceptance. New-feature work stays paused.
+
+Next maintenance is M01–M06: custom Original-style restoration, shorter audio
+streams, generated-audio rollback injection, unexpected worker diagnostics,
+continuous/zoomed visible playhead checks and cross-worker/cache-version hygiene.
+Portrait remains deferred. Native frame agreement does not establish complete
+on-screen ruler/playback behavior or perceptual travel quality.

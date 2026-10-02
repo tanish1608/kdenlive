@@ -23,6 +23,11 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 
 ## Current state
 
+- The [maintenance integration review](maintenance-integration-review.md) records
+  Claude's H01–H14 delivery, local merge `cd4cbda`, independent 290-test media
+  suite, native builds and candidate desktop Stop/chat/cut-boundary checks.
+  The [active checklist](completion-checklist.md) retains remaining caption,
+  rollback and playback gaps. New features and releases remain paused.
 - Upstream: KDE Invent, tag `v26.08.1`, commit
   `55e16e85cd9a9c6e032cd27a621137b4da881a7c`.
 - Branch: `codex/ai-assistant-foundation`; remote `upstream` is read-only by intent.
@@ -72,6 +77,8 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - **Captions** recognizes bounded original timeline audio, skips silence, caches
   speech separately, and applies reviewed native subtitles. Clean/Bold/Original
   presets preserve event text and timing. Word alignment remains pending.
+  Original currently clears a pre-existing custom global subtitle override;
+  Undo restores it. Full restoration is tracked as M01.
 - A visual draft receives one cached-observation quality review before Apply.
   One revision preserves total frames unless a substantially underfilled draft
   can grow toward the locally reachable target in that same bounded call. Source/recipe
