@@ -357,7 +357,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             setTask(2, i18n("Working"));
             m_activeTask = 2;
             m_status->setText(i18n("Reviewing story and pacing…"));
-            m_chat->addMessage(i18n("Assistant"), i18n("I’m checking this draft against the cached observations once. Any revision keeps its total length."));
+            m_chat->addMessage(i18n("Assistant"),
+                               i18n("I’m checking this draft against the cached observations once, including its story, pacing and requested length."));
         } else {
             m_status->setText(i18n("Analyzed %1 of %2 videos · %3 cached", event.value(QStringLiteral("completed")).toInt(),
                                    event.value(QStringLiteral("total")).toInt(), event.value(QStringLiteral("cached")).toInt()));
@@ -424,9 +425,8 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                                        : i18n("Quality review was unavailable. The original draft passed source and timing checks, but its story and pacing "
                                               "were not reviewed. You can inspect it before Apply or try again."));
             } else {
-                m_chat->addMessage(i18n("Assistant"), status == QStringLiteral("revised")
-                                                          ? i18n("One revision was proposed with the same total length: %1", reason)
-                                                          : i18n("The model review kept the draft: %1", reason));
+                m_chat->addMessage(i18n("Assistant"), status == QStringLiteral("revised") ? i18n("One revision was proposed: %1", reason)
+                                                                                          : i18n("The model review kept the draft: %1", reason));
                 m_chat->addMessage(i18n("Assistant"), i18n("This review uses sampled observations. Preview the actual cuts to judge the result."));
             }
             m_chat->addMessage(i18n("Assistant"),
@@ -434,12 +434,20 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                                     "were too short, unsuitable, or duplicates. Select a proposed shot to see why it belongs in the story.",
                                     QString::number(review.value(QStringLiteral("available_frames")).toInt() * secondsPerFrame, 'f', 1),
                                     review.value(QStringLiteral("skipped_assets")).toInt()));
+            const qint64 target =
+                qMin(review.value(QStringLiteral("requested_frames")).toInteger(), review.value(QStringLiteral("available_frames")).toInteger());
+            if (qint64(frames) * 100 < target * 85) {
+                m_chat->addMessage(i18n("Assistant"),
+                                   i18n("This draft is substantially shorter than the requested footage estimate. A kept model review does not establish "
+                                        "that the duration is fulfilled. Inspect the shot choices and review explanation, or request a refinement."));
+            }
         }
-        reply(seconds + 0.1 < m_requestedSeconds ? i18n("I’ve proposed %1 shots totaling %2 seconds of your requested %3. I kept the edit shorter rather than "
-                                                        "repeating footage. Review the shots above, then apply or send a refinement.",
-                                                        index, QString::number(seconds, 'f', 1), m_requestedSeconds)
-                                                 : i18n("Your %1-shot plan is ready (%2 seconds). Review the shots above, then apply or send a refinement.",
-                                                        index, QString::number(seconds, 'f', 1)));
+        reply(seconds + 0.1 < m_requestedSeconds
+                  ? i18n("I’ve proposed %1 shots totaling %2 seconds of your requested %3. Review the available footage and shot "
+                         "choices above, then apply or send a refinement.",
+                         index, QString::number(seconds, 'f', 1), m_requestedSeconds)
+                  : i18n("Your %1-shot plan is ready (%2 seconds). Review the shots above, then apply or send a refinement.", index,
+                         QString::number(seconds, 'f', 1)));
         m_status->setText(review.value(QStringLiteral("assessment")).toObject().value(QStringLiteral("status")) == QStringLiteral("unavailable")
                               ? i18n("Draft ready · quality review unavailable")
                               : i18n("Ready for review · video only"));

@@ -351,3 +351,19 @@ the assistant session. Goa's two existing cuts still return no compatible object
 negative results reuse cache without provider/helper calls. No user draft was
 changed and no improved complete travel film is claimed. Detailed validation
 and outstanding tracking limits are in [output review](quality-review.md).
+
+### Reachable duration and one-call recovery, October 1
+
+Planning and validation now share one-window/distinct-content duration bounds.
+A draft below 85% of the locally reachable target may expand during its existing
+single review request; no extra loop, reanalysis or deadline is introduced.
+Near-target drafts retain exact span. A shorter restrictive brief is explicitly
+explained. A same-input varied Goa request changed from 472 to 563 native-exported
+frames; the latter review genuinely expands its initial 502-frame draft. A separate
+desktop run delivered 19.6 seconds for 20, with Apply/one Undo/Redo/save/reopen
+verified in a private copy preserving the earlier sequence.
+
+See [editorial duration](editorial-duration.md) for comparisons, tests and limits.
+This improves duration coverage; silent sound, framing, busy shots and unresolved
+action cuts still prevent claiming a complete high-quality travel film.
+Claude's stability work is complete and undergoing separate integration checks.

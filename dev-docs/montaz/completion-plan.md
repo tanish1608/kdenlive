@@ -33,19 +33,20 @@ merges every Claude delivery locally. No external messages, pushes or releases.
 
 ## Codex: immediate checklist
 
-- [ ] Reproduce the 20-second Goa brief using existing cached evidence; record
+- [x] Reproduce the 20-second Goa brief using existing cached evidence; record
   requested, usable, feasible and delivered frames and why shots were omitted.
-- [ ] Make feasibility agree with the actual distinct-source/trim/recipe rules;
+- [x] Make feasibility agree with the actual distinct-source/trim/recipe rules;
   summed sampled windows must not promise capacity the validator cannot use.
-- [ ] Improve opening, development, details/activity and ending guidance using
+- [x] Improve opening, development, details/activity and ending guidance using
   observed footage. Missing story material must be explained, never invented.
-- [ ] Detect substantial avoidable underfill before review. Use a bounded shared
+- [x] Detect substantial avoidable underfill before review. Use a bounded shared
   repair allowance with explicit total call/deadline limits; no critic/retry loop.
   Preserve a shorter coherent result when usable relevant material is exhausted.
-- [ ] Add regressions for the current underfill, impossible 60-second requests,
+- [x] Add regressions for the current underfill, impossible 60-second requests,
   short sources, duplicate source ranges, cancellation and unavailable review.
-- [ ] Export before/after edits for the same brief and sources. Compare all cuts,
-  duration, coverage, endings and music timing; document failures as well as wins.
+- [x] Export before/after edits for the same brief and sources. Compare cut frames,
+  duration, coverage and endings; document failures as well as wins. Music timing
+  remains a separate workflow gate because these exports are visual-only.
 
 Primary files: `planning.py`, `editorial.py`, their tests and necessary native
 metadata/UI validation. Codex owns shared contracts, worker dispatch and media
@@ -143,3 +144,12 @@ required by the agreed completion scope; do not silently add another provider.
 - [ ] Codex reviews Claude's diffs, reruns relevant combined checks, records quality
   limits and commits the verified integration. Completion requires output review,
   not merely model approval or passing tests.
+
+## Immediate Codex delivery
+
+Duration feasibility, one-call underfill recovery and native before/after export
+checks are implemented. See [editorial duration evidence](editorial-duration.md),
+including restrictive-brief negatives and remaining visual/audio limits. Claude's
+`codex/claude-match-stability` at `69ad410` is complete and under integration review.
+Later milestones remain open; immediate duration improvement is not completion
+of the full film-quality target.

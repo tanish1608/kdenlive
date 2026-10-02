@@ -66,8 +66,8 @@ source overflow, unreasonable cut durations, and excess requested duration.
 Shorter edits are explicitly reported; footage is never stretched or repeated to
 fill a brief. Missing keys and provider/parse failures stop the run before Apply.
 Travel cuts below one second are rejected. The planner gets a feasible target
-from distinct usable trimmed windows, rather than only a maximum requested
-duration. The preview shows each shot's purpose/reason, a usable-duration estimate
+from one permitted window per distinct source, including recipe duration floors
+and gaps between fixed short windows, rather than only a maximum requested duration. The preview shows each shot's purpose/reason, a usable-duration estimate
 and excluded-source count. This optional review metadata is independently checked
 against the proposal before Apply; it cannot alter editor operations. Quality
 scores are model judgments, not measured output quality. There is no permissive
@@ -92,8 +92,12 @@ Each valid visual draft receives one additional Gemini text review using its
 existing sampled observations. It can keep the draft or propose one complete
 revision of shot selection/order/durations, with a short reason. Revised shots
 pass the original recipe, quality, distinct-content and source-range checks and
-must preserve the draft's exact total frame count. No footage is reanalyzed for
-this review, and no automatic critic/revision loop or retry runs.
+normally preserve the draft's exact total frame count. When the draft falls below
+85% of the locally reachable target, that same review may expand it up to the
+target using relevant distinct footage. A shorter coherent edit can be kept with
+a reason explaining unsuitable or redundant material. This threshold triggers
+editorial inspection; it is not a quality score. No footage is reanalyzed and no
+automatic critic/revision loop, extra request or retry runs.
 
 Review is limited to 24 draft shots, 32 candidate sources and 96 KiB of context;
 larger inputs skip it explicitly. A provider/response/validation failure retains
@@ -324,3 +328,10 @@ adds one separately labelled request with the configured key on the same
 synthetic frames; that answer never feeds the native checks. General portrait
 framing, manual anchor correction, wider (whole-project) candidate search,
 phrase/downbeat detection, whip pans, object wipes and speed ramps remain future work.
+
+Captured before/after drafts can be verified without provider calls using
+`assistant/tools/check_editorial_quality.py --craft-root … --build-root …
+--input-dir /private/captured-draft`. Inputs are `result.json` (proposal/review)
+and `private-sources.json` (bin IDs to absolute files). Native Apply, Undo/Redo,
+reload, exact-zone export and decoded timing are checked. Keep captures and media
+outside Git; see [duration evidence](../dev-docs/montaz/editorial-duration.md).

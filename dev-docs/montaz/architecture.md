@@ -132,7 +132,11 @@ metrics. It has no authority to change the edit contract.
 `editorial.py` now reviews each validated visual draft once against the existing
 observations. Its single text request returns keep or one revised shot plan.
 Revisions reuse `proposal_from_plan`, preserving all source/recipe constraints
-and the original total duration. Review cannot modify an already applied edit.
+and the original total duration, except that drafts below 85% of a locally
+reachable target may grow toward that target in the same review call. The target
+uses interval unions over one allowed window per distinct source, with the same
+recipe floors/ceilings as validation. Restrictive briefs may retain shorter edits
+with an explanation. Review cannot modify an already applied edit.
 Oversized context skips review; provider/parse/invalid-revision failures explicitly
 retain an unreviewed original draft. Cancellation never takes that fallback.
 

@@ -22,6 +22,8 @@ REVIEW_CODES = {
     "review_limit",
 }
 
+UNDERFILL_PERCENT = 85  # Editorial trigger, not a perceptual quality score.
+
 
 def review_draft(
     snapshot: Snapshot,
@@ -31,16 +33,34 @@ def review_draft(
     brief: dict,
     provider: Gemini,
     media: MediaTools,
+    *,
+    target_frames: int | None = None,
 ) -> tuple[dict, dict]:
     """Keep a validated draft available on review failure, explicitly unreviewed.
 
     One text request may return one complete revision. It must obey the original
-    recipe/source constraints and preserve total duration. No media extraction,
-    automatic retry, recursive review, or provider-selected editor operations.
+    recipe/source constraints. Substantially underfilled drafts may grow toward
+    an editor-computed feasible target in this same call; other drafts preserve
+    their total duration. No media extraction, automatic retry, recursive review,
+    or provider-selected editor operations.
     """
     media.check()
     original = proposal_from_plan(snapshot, request_id, draft, evidence, brief)
     total = sum(op.duration_frames for op in original.operations)
+    repair_duration = (
+        target_frames is not None and total * 100 < target_frames * UNDERFILL_PERCENT
+    )
+    duration_rule = (
+        f"The initial draft uses only {total} of a reachable {target_frames} target frames. "
+        "Check unused relevant observations before accepting such a short edit. One revision "
+        f"may increase duration from {total} up to {target_frames} frames, using more distinct "
+        "relevant shots or more of their clean motion. Aim near the target without repetition, "
+        "padding or invented activity. Preserve a shorter coherent edit when the brief excludes "
+        "remaining material or the unused views are redundant. For a shorter result, reason "
+        "must explain which observed material is unsuitable, redundant or outside the brief. "
+        if repair_duration
+        else f"A revision must preserve EXACTLY {total} total project frames. "
+    )
     payload = json.dumps(
         dict(draft=draft, evidence=evidence, brief=brief), ensure_ascii=False
     )
@@ -58,8 +78,10 @@ def review_draft(
         "subject continuity, contrast of scale/activity, purposeful pacing, and a satisfying end. "
         "Do not assert unseen motion, exact action resolution, musical beats or improved quality. "
         "Keep a coherent draft unless a specific visible observation supports a concrete change. "
-        "One revision may reorder/replace shots or redistribute duration, but must preserve "
-        f"EXACTLY {total} total project frames. Use each source at most once. Select only known "
+        "For a calm ending, prefer an observed settled view over an unresolved pan or zoom. "
+        "One revision may reorder/replace shots or redistribute duration. "
+        + duration_rule
+        + "Use each source at most once. Select only known "
         "bin_id/window_id, quality>=50 and at least one second of usable footage. All shots begin "
         "at the window's trim_in and end by trim_out, within original asset bounds. "
         f"Recipe: {story} Shot lengths {minimum}–{maximum} seconds, or the full usable range "
@@ -93,8 +115,14 @@ def review_draft(
             return draft, dict(status="kept", reason=result["reason"], code="none")
         revised = dict(shots=result["shots"])
         candidate = proposal_from_plan(snapshot, request_id, revised, evidence, brief)
+        candidate_total = sum(op.duration_frames for op in candidate.operations)
+        duration_valid = (
+            total <= candidate_total <= target_frames
+            if repair_duration
+            else candidate_total == total
+        )
         if (
-            sum(op.duration_frames for op in candidate.operations) != total
+            not duration_valid
             or candidate.operations == original.operations
             or len(candidate.operations) > 24
         ):

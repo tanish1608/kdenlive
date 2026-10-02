@@ -1049,3 +1049,109 @@ TEST_CASE("Estimated beat timing survives native undo serialization and export",
     pCore->projectManager()->testSetDocument(nullptr);
     pCore->setCurrentProfile(oldProfile);
 }
+
+TEST_CASE("Editorial proposals apply, serialize and export at their measured duration", "[Montaz]")
+{
+    const auto root = qEnvironmentVariable("MONTAZ_EDITORIAL_QA_ROOT");
+    if (root.isEmpty()) return;
+    const auto oldProfile = pCore->getCurrentProfilePath();
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto undo = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(undo);
+    pCore->projectManager()->testSetDocument(&document);
+    REQUIRE(pCore->setCurrentProfile(QStringLiteral("atsc_1080p_2997")));
+    auto timeline = TimelineItemModel::construct(document.uuid(), undo);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int track = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, track));
+    QFile sourcesFile(QDir(root).filePath(QStringLiteral("private-sources.json")));
+    REQUIRE(sourcesFile.open(QIODevice::ReadOnly));
+    const auto sources = QJsonDocument::fromJson(sourcesFile.readAll()).object();
+    QMap<QString, QString> binIds;
+    for (auto it = sources.begin(); it != sources.end(); ++it) {
+        auto producer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), it.value().toString().toUtf8().constData());
+        REQUIRE(producer->is_valid());
+        auto bid = QString::number(bin->getFreeClipId());
+        Fun u = []() { return true; }, r = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(bid, producer, QStringLiteral("-1"), u, r));
+        binIds[it.key()] = bid;
+    }
+    undo->clear();
+    {
+        Montaz::EditorAdapter adapter;
+        const auto context = adapter.snapshot();
+        QFile input(QDir(root).filePath(QStringLiteral("result.json")));
+        REQUIRE(input.open(QIODevice::ReadOnly));
+        const auto result = QJsonDocument::fromJson(input.readAll()).object();
+        auto proposal = result.value("proposal").toObject();
+        proposal["project_id"] = context.value("project_id");
+        proposal["sequence_id"] = context.value("sequence_id");
+        proposal["base_revision"] = context.value("revision");
+        auto operations = proposal.value("operations").toArray();
+        int total = 0;
+        for (int i = 0; i < operations.size(); ++i) {
+            auto op = operations[i].toObject();
+            REQUIRE(binIds.contains(op.value("bin_id").toString()));
+            op["bin_id"] = binIds.value(op.value("bin_id").toString());
+            op["track_id"] = QString::number(track);
+            REQUIRE(op.value("start_frame").toInt() == total);
+            total += op.value("duration_frames").toInt();
+            operations[i] = op;
+        }
+        proposal["operations"] = operations;
+        REQUIRE(Montaz::validateEditorialReview(context, proposal, result.value("review").toObject()).isEmpty());
+        REQUIRE(adapter.apply(proposal).isEmpty());
+        REQUIRE(undo->count() == 1);
+        REQUIRE(timeline->getTrackClipsCount(track) == operations.size());
+        REQUIRE(timeline->duration() == total);
+        REQUIRE(timeline->checkConsistency());
+        const auto applied = adapter.snapshot().value("occupied").toArray();
+        for (const auto item : applied) {
+            const auto clip = item.toObject();
+            const auto id = clip.value("instance_id").toString().toInt();
+            const int start = clip.value("start_frame").toInt(), duration = clip.value("duration_frames").toInt();
+            REQUIRE(timeline->getClipByPosition(track, start) == id);
+            REQUIRE(timeline->getClipByPosition(track, start + duration - 1) == id);
+        }
+        undo->undo();
+        REQUIRE(timeline->getTrackClipsCount(track) == 0);
+        undo->redo();
+        REQUIRE(adapter.snapshot().value("occupied").toArray() == applied);
+        const auto scene = QDir(root).filePath(QStringLiteral("native-editorial.mlt"));
+        {
+            Mlt::Consumer serializer(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+            REQUIRE(serializer.is_valid());
+            serializer.connect(*timeline->tractor());
+            serializer.run();
+        }
+        Mlt::Producer reopened(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+        REQUIRE(reopened.is_valid());
+        // The serialized black background includes seek padding. Render only
+        // the reviewed content zone, as Kdenlive's native rendering path does.
+        REQUIRE(reopened.get_length() >= total);
+        const auto output = QDir(root).filePath(QStringLiteral("native-editorial.mp4"));
+        {
+            Mlt::Consumer renderer(pCore->getProjectProfile(), "avformat", output.toUtf8().constData());
+            REQUIRE(renderer.is_valid());
+            renderer.set("vcodec", "libx264");
+            renderer.set("crf", 18);
+            renderer.set("preset", "fast");
+            renderer.set("audio_off", 1);
+            renderer.set("real_time", -1);
+            renderer.set("in", 0);
+            renderer.set("out", total - 1);
+            renderer.set("terminate_on_pause", 1);
+            std::unique_ptr<Mlt::Producer> zone(reopened.cut(0, total - 1));
+            renderer.connect(*zone);
+            renderer.run();
+        }
+        REQUIRE(QFileInfo(output).size() > 1000);
+    }
+    undo->clear();
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    pCore->setCurrentProfile(oldProfile);
+}
