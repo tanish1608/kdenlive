@@ -3,7 +3,7 @@
 
 # Assistant implementation plan — October 1, 2026
 
-Current execution and Codex/Claude assignments: [completion plan](completion-plan.md).
+Current execution and Codex/Claude assignments: [active checklist](completion-checklist.md).
 The sections below record the implementation history.
 
 ## Goal and boundaries

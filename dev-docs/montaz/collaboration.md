@@ -3,13 +3,14 @@
 
 # Montaz engineering collaboration
 
-Updated October 1, 2026. This is the handoff for Claude as an implementation
+Updated October 2, 2026. This is the handoff for Claude as an implementation
 engineer and Codex as the integration reviewer. Read it before changing code.
 This document assigns work; unchecked tasks have **not** been implemented.
 
-**Current assignment:** [completion plan](completion-plan.md). M1–M5 below are
-historical and merged in `8b6dcfc`; Claude’s next branch is
-`codex/claude-match-stability`. Follow its ownership and S1–S5 checklist.
+**Current assignment:** [independent packages C01–C04](claude-next-tasks.md),
+tracked in the [active completion checklist](completion-checklist.md).
+M1–M5 and the later stability/landmark branches are already integrated.
+Their sections below are historical; do not restart them.
 
 ## Workspace and branch
 
@@ -17,14 +18,14 @@ historical and merged in `8b6dcfc`; Claude’s next branch is
 | --- | --- |
 | Active project | `/Users/tanishvardhineni/Documents/montaz/kdenlive` |
 | Integration branch | `codex/ai-assistant-foundation` |
-| Feature baseline | `59887df` — reviewed native object-aligned match cuts |
-| Claude branch | `codex/claude-match-cut-candidates` |
+| Feature baseline | `a044759` — reviewed landmark integration; start new work from the later planning commit containing C01–C04 |
+| Claude branches | One per C01–C04; see the current assignment |
 | Claude worktree | `/Users/tanishvardhineni/Documents/montaz/kdenlive-claude` |
 | Preserved old editor | `/Users/tanishvardhineni/Documents/montaz/montaz` |
 | Upstream baseline | Kdenlive `v26.08.1`, `55e16e85cd9a9c6e032cd27a621137b4da881a7c` |
 
-The Claude branch starts after the handoff-document commit on the integration
-branch. Use the isolated worktree; do not switch the integration checkout's
+Each new Claude branch starts from the same planning commit on the integration
+branch, recorded once before work starts. Use the isolated worktree; do not switch the integration checkout's
 branch, edit the old Electron repository, or use its `dev.sh`/backend tests.
 
 Only `upstream` (KDE Invent) is currently configured. Do not push feature work
@@ -101,8 +102,8 @@ Python filenames above are under `assistant/src/montaz_assistant/`.
 Protocol changes require both Python and native validators/tests; do not add
 fields to an existing envelope assuming they will be ignored.
 
-The latest match cache version is `object-match-6` after native scale registration
-was added to the reviewed stability integration; see `match-stability-report.md`.
+The latest match cache version is `object-match-7` after reviewed landmark/native
+seed integration; see `landmark-integration.md`.
 It keys complete candidate
 evidence by source hashes, source windows, canvas, rational FPS, Gemini model and
 algorithm version. Empty or geometrically unsuitable candidate sets are cacheable;
@@ -116,10 +117,15 @@ compositions, and a progressive square-pixel project at up to 60 FPS. Temporary
 multi-selection is supported. Track the last outgoing/first incoming second at
 every project frame. A video-stream bound check rejects audio-only tails.
 Appearance/shape/motion gates are proxies, not calibrated identity confidence.
-Size smoothing retains measured centers. Uniform scaling is capped at 2× with
+Guarded fitting preserves measured motion. Uniform scaling is resolution-limited
+(1.6× for 1080p on 1080p; up to the native 2× ceiling for 4K) with
 canvas coverage; existing letterboxing can remain. Timing/order/IDs stay fixed.
 
 ## Known quality gaps and measured evidence
+
+The numbers below describe the original candidate-selection baseline. Current
+evidence and pending work are in [the active checklist](completion-checklist.md),
+[duration review](editorial-duration.md) and [landmark integration](landmark-integration.md).
 
 - The 15 private Goa sources total about 30.81 seconds. A 60-second edit requires
   repetition or generated material, which the current planner forbids.
@@ -345,7 +351,10 @@ git -C /Users/tanishvardhineni/Documents/montaz/kdenlive \
   log --oneline codex/ai-assistant-foundation..codex/claude-match-cut-candidates
 ```
 
-## Ready-to-use instruction for Claude
+## Historical first-assignment prompt
+
+For new work use [the C01–C04 assignment](claude-next-tasks.md). The prompt below
+is preserved only as history of the completed candidate-selection milestone.
 
 > Work in `/Users/tanishvardhineni/Documents/montaz/kdenlive-claude` on
 > `codex/claude-match-cut-candidates`. Read root `AGENTS.md` and

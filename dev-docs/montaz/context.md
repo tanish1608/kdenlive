@@ -427,3 +427,20 @@ See [landmark integration](landmark-integration.md). Compatible-shot suggestions
 and a quick montage remain next, using explicit native order/timing contracts;
 local rim refinement, whips/wipes and native ramps remain unfinished. Do not
 describe the full transition set or finished film quality as complete.
+
+## Active completion tracking — October 2
+
+The user requested one pending-work checklist and independent Claude assignments.
+[completion-checklist.md](completion-checklist.md) is now authoritative; older
+plans/collaboration assignments are history. Verified foundation is separate from
+remaining implementation, final audits and explicitly deferred product work.
+Codex checks items only after reviewed integration and applicable output evidence.
+
+[claude-next-tasks.md](claude-next-tasks.md) assigns four independent packages:
+cached-evidence shot discovery, low-resolution motion/occlusion measurements,
+versioned travel recipe data and synthetic audio quality regressions. Each uses
+new dedicated files and a separate branch from the same planning baseline;
+existing landmark/stability work is preserved. Codex owns native/worker/planner
+integration, quick montage contracts, manual/native landmark refinement,
+speech/audio editing and end-to-end quality checks. This document assigns work;
+no Claude session was started or messaged automatically.

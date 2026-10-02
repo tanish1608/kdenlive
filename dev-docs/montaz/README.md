@@ -17,7 +17,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 6. [Implementation checklist](work-plan.md): chat milestone and footage-quality gates.
 7. [Output review](quality-review.md): exported footage, measurements and remaining quality gaps.
 8. [Engineering collaboration](collaboration.md): Claude's scoped assignment, isolated branch, validation and Codex review/merge workflow.
-9. [Completion plan](completion-plan.md): current Codex/Claude ownership, immediate checklists and finish criteria.
+9. [Active completion checklist](completion-checklist.md): pending work, owners, dependencies and evidence; [Claude assignment](claude-next-tasks.md) defines independent packages. [Earlier completion plan](completion-plan.md) records history.
 10. [Music timing](music-timing.md): conservative beat estimates, accent fallback, caching and native export checks.
 11. [Draft revisions](draft-revision.md): native ownership, replacement, Undo and preservation checks.
 

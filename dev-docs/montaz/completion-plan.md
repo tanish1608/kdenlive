@@ -3,6 +3,10 @@
 
 # Montaz completion plan — October 1, 2026
 
+**Historical plan:** current status, ownership and completion gates are tracked
+in [the active checklist](completion-checklist.md). Claude's new independent
+packages are assigned in [claude-next-tasks.md](claude-next-tasks.md).
+
 ## Target and current evidence
 
 Finish a useful editing assistant in Kdenlive: grounded travel stories, intentional
