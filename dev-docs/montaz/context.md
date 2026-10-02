@@ -468,3 +468,39 @@ This is not a live AI montage feature or a real-footage quality verdict.
 Worker dispatch, bounded discovery/joint tracking, dock review/Stop/Apply and
 real-footage comparisons remain N02/N03. Claude's packages remain unreviewed
 until delivery; do not infer completion from the user's report that work started.
+
+## Reviewed Claude packages and chat cleanup — October 2
+
+C01–C04 were inspected and merged separately as `9d910a6`, `97d274e`, `2b6e7f3`
+and `9e4563c`. Original branches, reports and landmark work remain intact. These
+are bounded analysis/data/test libraries, not exposed discovery/recipe/transition
+features. C01–C04 and N01 are now complete within those scopes.
+
+Correction commit `b616333` fixes the three reproduced audio bugs: initial audio
+is an onset baseline, caption phrases sharing frames retain words within native
+bounds, and mapping validates before speech-cache publication. Bad cached answers
+are removed before one fresh recognition attempt, without a retry loop. Beat and
+caption cache versions advance. Review also fixed a recipe allocation that falsely
+left development without footage, numeric-looking source IDs, and fixture-tool
+subprocess deadlines.
+
+Commit `d09fb2d` replaces separate Align cuts / Match cut controls with one
+Transitions menu, keeps Add music / Captions and removes Add sound and the fixed
+workflow. Standalone explicit sound/tool requests route through existing native
+eligibility/review/Undo paths; normal briefs and negations remain visual briefs.
+Whip pan, Object wipe and Speed ramp are visibly unavailable. Future recipe
+integration must require explicitly requested transitions.
+
+Combined Python validation: 281 run, 271 pass, ten opt-in tracker checks skip;
+no expected failures. Qt transport/command checks pass 47 and chat checks pass 7.
+Craft builds the editor and native tests; final `assistanttest` passes in 23.07 s,
+including visible-widget menu activation and settled no-document tool requests.
+The rebuilt right dock and unsupported-transition/invalid-duration replies were
+checked on macOS without a provider request or changing the saved review fixture.
+Native tests verify menu items; desktop capture did not retain the popup.
+New brief leaves chat ready. Synthetic audio and eight decoded motion fixtures
+were measured independently; see [integration evidence](claude-integration-review.md).
+
+Next: N02 reviewed compatible-shot suggestions, then N03 joint framing and an
+explicit quick montage. Whips/wipes/ramps, final audio/caption lifecycle audits and
+end-to-end perceptual quality remain pending. Do not call the full app complete.

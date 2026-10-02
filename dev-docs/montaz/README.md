@@ -39,7 +39,8 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 - Follow-ups after Apply can **Replace draft** within the same exact span through
   one native Undo. Manual edits/effects/groups make replacement unavailable;
   neighbors, audio and subtitles are preserved. Ownership is session-only.
-  The panel guides story → music → Align cuts → Match cut → captions.
+  Music, transitions and captions are optional tools; the panel imposes no fixed
+  workflow. Transitions are requested explicitly from one menu or through chat.
 - Compiled and exercised behind `BUILD_MONTAZ_ASSISTANT=ON`:
   dock, sequence snapshot/revision bridge, proposal list, and undoable application
   through Kdenlive's own insertion API. It is disabled in default builds.
@@ -53,16 +54,21 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   settings, raw/prepared reuse, exact timeline duration, loudness/edge preparation,
   Listen/Stop and one native undoable import/insertion. The Goa music export keeps
   all 474 decoded visual frames unchanged and measures -18.1 LUFS / -5.0 dBFS.
-- Local **Align cuts** proposes bounded shifts to estimated beats in existing music,
+- **Transitions → Beat-synced cuts** proposes bounded shifts to estimated beats in existing music,
   with explicit energy-accent fallback.
   It preserves shot order, source starts, clip IDs, music and total span; reviewed
   changes use native resize/move operations and one Undo. Complex timelines are
   ineligible. Estimates do not identify downbeats or phrases.
-- **Add sound** generates one explicitly described ElevenLabs sound effect at the
+- A chat request such as **add a 2 second sound of waves** generates one
+  explicitly described ElevenLabs sound effect at the
   playhead, with bounded duration, private raw/prepared reuse, preview and native
-  undoable audio insertion. Its **Suggest sounds** action reuses cached visual
+  undoable audio insertion. Asking **suggest sounds** reuses cached visual
   observations for sparse reviewed foley cues, followed by separate selected
   generation. This is not audio-event recognition.
+- The Transitions menu also offers **Match cut**. Whip pan, Object wipe and Speed
+  ramp are labelled coming soon and disabled. Reviewed Claude analysis/data/test
+  packages and audio corrections are recorded in [integration evidence](claude-integration-review.md);
+  library integration does not complete these transitions or quick montage UI.
 - **Captions** recognizes bounded original timeline audio, skips silence, caches
   speech separately, and applies reviewed native subtitles. Clean/Bold/Original
   presets preserve event text and timing. Word alignment remains pending.

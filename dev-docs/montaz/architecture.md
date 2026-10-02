@@ -56,6 +56,15 @@ issued by the editor request, not inferred from provider output. Music-accent
 retiming rejects additional effects/audio. Each sound is described explicitly;
 no visual observation is treated as evidence of audible speech or an event.
 
+The native dock routes only bounded, standalone explicit English tool aliases
+through `chatcommands`: music, sound suggestions/described sounds, beat cuts and
+pair matches. Normal briefs and negations retain visual planning. Sound requests
+use chat instead of an extra toolbar menu. Transitions require a menu selection
+or explicit request; unavailable whip/wipe/ramp aliases finish with a local reply.
+Tool routing does not bypass worker transport, native review, revision checks,
+Stop or Undo. Recipe transition preferences are data only; future wiring must
+intersect implemented capabilities with transitions explicitly requested by users.
+
 ## Snapshot and proposal
 
 The native adapter issues a snapshot with project ID, sequence ID, monotonically

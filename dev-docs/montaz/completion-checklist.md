@@ -33,29 +33,38 @@ not establish perceptual quality.
 - [x] F08 — Selected-pair landmark match cuts, guarded zoom tracking, source
   resolution caps, Compare/Apply/Undo/reopen/export. Perspective, crop and
   landmark precision remain limited. [Evidence](landmark-integration.md).
+- [x] F09 — Optional Add music / Transitions / Captions toolbar, described sounds
+  through explicit chat requests, and removal of the fixed workflow. Commit
+  `d09fb2d`. [Native and desktop checks](claude-integration-review.md).
 
-## Claude: independent packages assigned now
+## Claude: reviewed independent packages
 
-Each package can start from the same baseline and uses separate files. These
-are analysis/data/test deliveries; editor integration remains a separate gate.
+Each package was delivered from the same baseline and merged separately. These
+are analysis/data/test deliveries; editor feature integration remains a separate gate.
 Detailed scope, branches and acceptance criteria: [Claude assignment](claude-next-tasks.md).
 
-- [ ] C01 — Cached-evidence shot discovery: bounded, deterministic suggestions
+- [x] C01 — Cached-evidence shot discovery: bounded, deterministic suggestions
   of possible matching subjects, excluded sources and explicit empty results.
-  Scene labels alone must never count as verified object matches.
-- [ ] C02 — Local motion/occlusion evidence: bounded low-resolution frame
+  Scene labels alone must never count as verified object matches. Merge `9d910a6`.
+  [Evidence](claude-integration-review.md).
+- [x] C02 — Local motion/occlusion evidence: bounded low-resolution frame
   analysis, directional movement and occlusion candidates, with conservative
   negative fixtures and cancellation. No transition is applied by this module.
-- [ ] C03 — Versioned travel recipe data: story slots, pacing, music arc,
+  Merge `97d274e`. [Evidence](claude-integration-review.md).
+- [x] C03 — Versioned travel recipe data: story slots, pacing, music arc,
   transition preferences and missing-footage fallbacks for postcard/adventure/diary.
-- [ ] C04 — Audio quality regression pack: variable/ambiguous rhythm, silence,
+  Merge `2b6e7f3`; slot-allocation correction `b616333`.
+  [Evidence](claude-integration-review.md).
+- [x] C04 — Audio quality regression pack: variable/ambiguous rhythm, silence,
   non-speech noise and speech timing/bounds. Deliver reproducible failures and
-  measurements; no provider calls or changes to shared audio code.
+  measurements. Merge `9e4563c`; Codex fixed all three reproduced shared-audio
+  bugs in `b616333`, with no live provider calls. [Evidence](claude-integration-review.md).
 
 ## Codex: next integration milestones
 
-- [ ] N01 — Review C01–C04, fix cross-boundary issues, merge each separately and
-  update this checklist with evidence. No automatic acceptance of Claude reports.
+- [x] N01 — Review C01–C04, fix cross-boundary issues, merge each separately and
+  update this checklist with evidence. Four merges above; review corrections
+  `b616333`. [Combined tests and measured evidence](claude-integration-review.md).
 - [ ] N02 — Add reviewed compatible-shot suggestions to the dock; bind source
   windows, current selection, revision and identities; budget provider/tracker
   work across the whole request. Depends on C01.
@@ -145,9 +154,9 @@ These do not block the current app milestone and are not assigned for implementa
 
 ## Execution order
 
-Claude starts C01–C04 independently. Codex starts N03's native contract and tests
-against synthetic reviewed inputs, then integrates C01 through N02 and validates
-N03 on real clips. After that: N04/N05 and N06, measured T01/T02, then T03;
+C01–C04 and N01 are integrated; N03a's native contract has synthetic validation.
+Next integrate C01 through N02 and validate the joint N03 montage on real clips.
+After that: N04/N05 and N06, measured T01/T02, then T03;
 speech/audio work and Q checks complete the app audit. Claude's independent
 packages may proceed sequentially or in isolated branches in parallel. Neither
 engineer changes the other's owned files without an explicit updated handoff.
