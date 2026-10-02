@@ -53,8 +53,10 @@ replacement. Ownership is session-only and clears on project/sequence switch or
 reopen; **New brief** creates a separate appended edit. Demo mode remains append-only.
 See [draft revision checks](../dev-docs/montaz/draft-revision.md).
 
-The panel shows the supported order: story, music, **Align cuts**, **Match cut**,
-then captions. Timing alignment rejects effect-bearing shots and existing
+The optional toolbar offers **Add music**, **Transitions** and **Captions**;
+sound requests use chat. There is no fixed tool order. **Beat-synced cuts** and
+**Match cut** live in Transitions and require an explicit request. Timing
+alignment rejects effect-bearing shots and existing
 subtitles. Its native Undo/Redo updates owned draft timing, so later refinements
 can preserve the aligned span; refinements may change the internal boundaries.
 
@@ -124,8 +126,8 @@ analysis stays cached. Logs contain only review status/code, not its explanation
 
 The review checks a proposed draft, not a rendered finished sequence. Sampled
 observations cannot verify exact action endings, musical phrasing or perceptual
-quality. Apply still appends the reviewed draft using native one-batch Undo;
-replacing an existing finished edit remains a separate implementation gate.
+quality. Apply appends a reviewed draft or replaces an eligible session-owned
+draft through native one-batch Undo, as described above.
 
 ## Instrumental music
 
@@ -150,8 +152,10 @@ Generated WAVs and content-addressed reuse copies live in
 the project when moving or sharing it. Raw provider responses are retained too,
 so encoding failures can retry locally without another generation. Successful prepared tracks are reused
 for matching mood, brief, duration, model and FPS. Stop preserves completed
-preparation. Invalid stored audio fails validation instead of silently requesting
-another paid generation. No keys, audio or generated projects belong in Git.
+preparation. Short or silent provider audio is evicted after validation fails;
+the next explicit request can generate fresh audio. Encoding failures, timeouts
+and Stop preserve reusable paid output. No automatic generation retry runs.
+No keys, audio or generated projects belong in Git.
 
 Preparation uses stereo 48 kHz PCM, an -18 LUFS loudness target and half-second
 opening/ending fades baked into the WAV. Native gain remains editable. Validation

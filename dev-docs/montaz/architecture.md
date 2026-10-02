@@ -204,8 +204,9 @@ from structured and text logs. Footage/transcripts are project data, not telemet
 The diagnostic implementation records timestamps, run/stage outcomes, revision,
 asset count, and apply result in the application's cache at `montaz/runs/*.jsonl`.
 It does not record bin paths, source text, environment variables, worker stderr,
-or free-form event reasons. Provider/model/cache progress is now recorded; log
-retention and measured editorial quality evaluation remain pending.
+or free-form event reasons. Provider/model/cache progress is recorded. Starting
+a run retains the newest 200 UUID-named logs and leaves unrelated files untouched.
+Broader measured editorial quality evaluation remains pending.
 
 ## Native integration locations
 
@@ -223,7 +224,7 @@ depend on Linux D-Bus for the macOS path.
 
 ## Cached sound suggestions
 
-`Add sound > Suggest sounds` captures all native video-only instances on one
+The explicit chat request `suggest sounds` captures all native video-only instances on one
 track (up to 64). Groups, clip effects, speed changes and transitions are excluded;
 existing audio must be assistant music/effects. Only the selected unique sources
 are resolved, hashed and probed. Cache-only analysis reads current content/model/

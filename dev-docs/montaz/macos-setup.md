@@ -143,8 +143,9 @@ In the editor, open **View → AI Assistant**, import a few small videos, open a
 sequence, open **AI**, choose a travel preset and duration, then send a chat brief.
 Inspect the list before **Apply edit**. Gemini uses a private settings file or
 `GEMINI_API_KEY`; see [assistant configuration](../../assistant/README.md).
-The current planner creates video-only cuts; narration, sound and captions follow
-in later milestones. Set `MONTAZ_ASSISTANT_DEMO=1` for the offline diagnostic.
+The visual planner creates video-only cuts. Music/effects and original-audio
+captions use separate optional reviewed tools; narration remains pending.
+Set `MONTAZ_ASSISTANT_DEMO=1` for the offline diagnostic.
 Verify one Undo removes the whole edit and Redo restores it. Full playback,
 save/reopen, seeking and a native Goa export were exercised locally. Additional
 native failure checks remain required; see

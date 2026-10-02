@@ -16,7 +16,7 @@ not establish perceptual quality.
 
 ## Current priority: maintenance only
 
-The user paused new features on October 2. Claude owns the existing-app bug/quality
+The user paused new features on October 2. Claude's existing-app bug/quality
 queue [H01–H14](claude-maintenance-handoff.md) was delivered and reviewed. Compatible-shot
 suggestions, quick montage UI, new transitions, recipe wiring and new speech/audio
 modes are on hold. Existing features may be fixed and measured; pending feature
