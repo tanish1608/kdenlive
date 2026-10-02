@@ -139,7 +139,12 @@ int main(int argc, char **argv)
                 r.w = registered.width();
                 r.h = registered.height();
             }
-            if (r.w < 4 || r.h < 4 || r.x < 0 || r.y < 0 || r.x + r.w > w || r.y + r.h > h) return 5;
+            // Below the seed minimum (4% each way) the subject cannot be aligned; reject
+            // this candidate as for leaving the frame, not as malformed output.
+            if (r.w < 0.04 * w || r.h < 0.04 * h || r.x < 0 || r.y < 0 || r.x + r.w > w || r.y + r.h > h) {
+                std::fprintf(stderr, "Track rejected at sample %d (subject bounds)\n", i);
+                return 5;
+            }
             const auto current = patch(image, r);
             if (i == 0) reference = current;
             const double score = similarity(reference, current);
