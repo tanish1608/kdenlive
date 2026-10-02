@@ -281,6 +281,22 @@ class MusicTests(unittest.TestCase):
             self.assertFalse(Path(self.spec["path"]).exists())
 
     @unittest.skipUnless(shutil.which(os.environ.get("MONTAZ_FFMPEG", "ffmpeg")), "FFmpeg required")
+    def test_short_or_silent_provider_audio_is_not_reused_by_a_later_request(self):
+        # Reusing such audio could never pass; the next explicit request
+        # generates again instead of failing forever without a provider call.
+        for index, bad in enumerate((audio_bytes(seconds=3.9), audio_bytes(silent=True))):
+            self.provider.compose.reset_mock()
+            self.provider.compose.side_effect = [bad, audio_bytes()]
+            spec = dict(self.spec, instruction=f"retry {index}")
+            with self.subTest(index=index):
+                with self.assertRaises(AssistantError) as caught:
+                    self.compose(dict(spec, path=str(self.root / f"bad{index}.wav")))
+                self.assertEqual(caught.exception.code, "invalid_music_audio")
+                result = self.compose(dict(spec, path=str(self.root / f"good{index}.wav")))
+                self.assertFalse(result["cached"])
+                self.assertEqual(self.provider.compose.call_count, 2)
+
+    @unittest.skipUnless(shutil.which(os.environ.get("MONTAZ_FFMPEG", "ffmpeg")), "FFmpeg required")
     def test_one_frame_codec_shortfall_is_padded_but_not_stretched(self):
         self.provider.compose.return_value = audio_bytes(seconds=3.98)
         result = self.compose()

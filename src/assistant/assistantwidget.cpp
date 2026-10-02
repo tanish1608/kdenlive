@@ -276,7 +276,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             else if (code == QStringLiteral("music_timeout") || code == QStringLiteral("worker_timeout"))
                 reply(i18n("Music generation timed out. No audio was applied; completed music remains available for reuse."));
             else if (code == QStringLiteral("invalid_music_audio"))
-                reply(i18n("The generated audio failed duration or sound checks. No audio was applied. Completed provider output is kept for a local retry."));
+                reply(i18n("The generated music was too short or silent, so it was not kept. No audio was applied; trying again requests new music."));
             else
                 reply(i18n("Music could not be prepared. Check ElevenLabs availability and credits, then try again. No audio was applied."));
             return;

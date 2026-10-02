@@ -204,6 +204,18 @@ class EffectTests(unittest.TestCase):
                 self.compose(spec)
             self.assertFalse(Path(spec["path"]).exists())
 
+    def test_short_or_silent_effect_audio_is_regenerated_on_request(self):
+        for index, bad in enumerate((audio_bytes(1), audio_bytes(2, silent=True))):
+            self.provider.compose.reset_mock()
+            self.provider.compose.side_effect = [bad, audio_bytes(2)]
+            spec = dict(self.spec, instruction=f"retry {index}")
+            with self.subTest(index=index):
+                with self.assertRaises(AssistantError):
+                    self.compose(dict(spec, path=str(self.root / f"bad{index}.wav")))
+                result = self.compose(dict(spec, path=str(self.root / f"good{index}.wav")))
+                self.assertFalse(result["cached"])
+                self.assertEqual(self.provider.compose.call_count, 2)
+
     def test_stop_and_existing_destination_do_not_generate(self):
         Path(self.spec["path"]).write_bytes(b"preserved")
         with self.assertRaises(AssistantError):

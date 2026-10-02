@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from .gemini import AssistantError
-from .music import _validate_wave, measure
+from .music import _validate_wave, measure, unusable_provider_audio
 from .protocol import decode, fields, frame
 
 EFFECT_MODEL = "eleven_text_to_sound_v2"
@@ -158,31 +158,32 @@ def compose_effect(snapshot, request_id, raw_spec, provider, media, progress):
             prefix=".effect-", dir=path.parent
         ) as temporary:
             normalized = Path(temporary) / "normalized.wav"
-            media._output(
-                [
-                    os.environ.get("MONTAZ_FFMPEG", "ffmpeg"),
-                    "-v",
-                    "error",
-                    "-nostdin",
-                    "-i",
-                    str(raw_path),
-                    "-t",
-                    f"{seconds:.9f}",
-                    "-af",
-                    "loudnorm=I=-26:TP=-6:LRA=7",
-                    "-map_metadata",
-                    "-1",
-                    "-ac",
-                    "2",
-                    "-ar",
-                    "48000",
-                    "-c:a",
-                    "pcm_s16le",
-                    str(normalized),
-                ]
-            )
             tolerance = snapshot.frame_rate.denominator / snapshot.frame_rate.numerator
-            _validate_wave(normalized, seconds, tolerance)
+            with unusable_provider_audio(raw_path):
+                media._output(
+                    [
+                        os.environ.get("MONTAZ_FFMPEG", "ffmpeg"),
+                        "-v",
+                        "error",
+                        "-nostdin",
+                        "-i",
+                        str(raw_path),
+                        "-t",
+                        f"{seconds:.9f}",
+                        "-af",
+                        "loudnorm=I=-26:TP=-6:LRA=7",
+                        "-map_metadata",
+                        "-1",
+                        "-ac",
+                        "2",
+                        "-ar",
+                        "48000",
+                        "-c:a",
+                        "pcm_s16le",
+                        str(normalized),
+                    ]
+                )
+                _validate_wave(normalized, seconds, tolerance)
             prepared = Path(temporary) / "prepared.wav"
             fade = min(0.1, seconds / 4)
             media._output(
@@ -208,10 +209,12 @@ def compose_effect(snapshot, request_id, raw_spec, provider, media, progress):
             media.check()
             prepared.chmod(0o600)
             os.replace(prepared, cached_path)
-    _validate_wave(cached_path, seconds)
+    with unusable_provider_audio(cached_path):
+        _validate_wave(cached_path, seconds)
     media.check()
     progress("measurement", reused)
-    measure(cached_path, snapshot.frame_rate, spec["duration_frames"], media)
+    with unusable_provider_audio(cached_path, raw_path):
+        measure(cached_path, snapshot.frame_rate, spec["duration_frames"], media)
     sha = hashlib.sha256()
     with cached_path.open("rb") as source, path.open("xb") as output:
         path.chmod(0o600)
