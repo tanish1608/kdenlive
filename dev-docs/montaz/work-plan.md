@@ -3,6 +3,9 @@
 
 # Assistant implementation plan — October 1, 2026
 
+Current execution and Codex/Claude assignments: [completion plan](completion-plan.md).
+The sections below record the implementation history.
+
 ## Goal and boundaries
 
 Build a practical travel editing assistant inside Kdenlive. Use its docks,
@@ -128,7 +131,7 @@ success and passing unit tests alone do not establish editorial quality.
 
 - [x] Select two adjacent native video instances; keep frame timing unchanged.
 - [x] Reuse MLT decoding/OpenCV CSRT in a bounded, cancellable helper process.
-- [x] Ask Gemini for one object pair; allow an explicit empty answer.
+- [x] One Gemini call offers up to three pairs; track at most two and permit empty answers.
 - [x] Cache successful pair evidence separately by content, trim, canvas, FPS,
   model and algorithm version; preserve existing scene/speech caches.
 - [x] Solve uniform position/scale keyframes with a 2× zoom ceiling and no newly
@@ -136,8 +139,10 @@ success and passing unit tests alone do not establish editorial quality.
 - [x] Add boundary comparison and reviewed native Transform application.
 - [x] Verify native Apply/Undo/Redo, serialization and exported geometry checks.
 - [x] Exercise desktop comparison, Apply, Undo/Redo and a fresh-process reopen.
-- [ ] Search multiple candidate pairs, allow manual anchor correction, measure
-  musical beats/phrases, then add directional motion/wipe/ramp proposals.
+- [x] Select locally from bounded candidate pairs and estimate musical beats with
+  explicit accent fallback.
+- [ ] Stabilize residual zoom jitter, discover useful neighboring shots, allow manual
+  anchor correction, identify phrases and add directional motion/wipe/ramp proposals.
 
 Two adjacent cuts in the latest Goa draft returned no compatible objects. The
 controlled moving-disc pair returned a tracked match. Neither is a travel-film

@@ -7,6 +7,10 @@ Updated October 1, 2026. This is the handoff for Claude as an implementation
 engineer and Codex as the integration reviewer. Read it before changing code.
 This document assigns work; unchecked tasks have **not** been implemented.
 
+**Current assignment:** [completion plan](completion-plan.md). M1–M5 below are
+historical and merged in `8b6dcfc`; Claude’s next branch is
+`codex/claude-match-stability`. Follow its ownership and S1–S5 checklist.
+
 ## Workspace and branch
 
 | Item | Location / value |
