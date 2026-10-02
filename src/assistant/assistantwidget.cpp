@@ -1123,14 +1123,22 @@ void Montaz::AssistantWidget::generateCaptions()
 void Montaz::AssistantWidget::changeCaptionStyle(const QString &preset)
 {
     if (m_worker->busy()) return;
-    clearProposal();
-    finishTasks(i18n("Superseded"));
+    const auto before = m_adapter->snapshot();
     m_applying = true;
     const auto result = m_adapter->captionStyle(preset);
     m_applying = false;
-    reply(result.isEmpty() ? i18n("Caption appearance updated. Text and timing are preserved; Undo restores the previous appearance. Original restores each "
-                                  "caption’s saved style.")
-                           : i18n("Add captions and enable and unlock their track before changing the style."));
+    if (!result.isEmpty()) {
+        // Nothing changed: a pending review, such as unapplied captions, stays available.
+        reply(!m_captionReview.isEmpty() ? i18n("Apply the proposed captions first, then choose a caption style. The proposal is still available.")
+                                         : i18n("Add captions and enable and unlock their track before changing the style."));
+        return;
+    }
+    if (m_adapter->snapshot() != before) {
+        clearProposal();
+        finishTasks(i18n("Superseded"));
+    }
+    reply(i18n("Caption appearance updated. Text and timing are preserved; Undo restores the previous appearance. Original restores each "
+               "caption’s saved style."));
 }
 
 void Montaz::AssistantWidget::matchCut()
