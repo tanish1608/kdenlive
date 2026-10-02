@@ -79,7 +79,7 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     sounds->addAction(i18n("Suggest sounds"), this, &AssistantWidget::suggestSounds);
     m_effect->setMenu(sounds);
     m_align = new QPushButton(i18n("Align cuts"), this);
-    m_align->setToolTip(i18n("Review small cut shifts to estimated beats in your existing assistant music, with energy accents as a fallback."));
+    m_align->setToolTip(i18n("Review cut timing after adding music and before Match cut or captions. Estimated beats use energy accents as a fallback."));
     soundActions->addWidget(m_align);
     layout->addLayout(soundActions);
     m_captions = new QPushButton(i18n("Captions"), this);
@@ -97,6 +97,9 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     m_match->setToolTip(i18n("Select two adjacent video-only shots to review an object-aligned match cut."));
     visualActions->addWidget(m_match);
     layout->addLayout(visualActions);
+    auto workflow = new QLabel(i18n("Story → Music → Align cuts → Match cut → Captions"), this);
+    workflow->setWordWrap(true);
+    layout->addWidget(workflow);
     connect(m_match, &QPushButton::clicked, this, &AssistantWidget::matchCut);
     connect(m_align, &QPushButton::clicked, this, &AssistantWidget::refineTiming);
     connect(m_music, &QPushButton::clicked, this, &AssistantWidget::composeMusic);
@@ -301,6 +304,9 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
             reply(i18n("Gemini returned unusable evidence or cuts. No edit was applied. Try a different brief."));
         else if (code == QStringLiteral("insufficient_footage"))
             reply(i18n("No usable video ranges are long enough for this travel edit. Add clearer clips of at least one second. No edit was applied."));
+        else if (code == QStringLiteral("revision_unavailable"))
+            reply(i18n("A revised draft could not fit the existing duration with usable footage. Your current edit is intact. Try a different refinement, or "
+                       "use New brief for a separate edit."));
         else
             reply(i18n("Planning could not finish. Check your source files and unlocked video tracks. No edit was applied."));
     });
@@ -366,13 +372,18 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
     });
     connect(m_worker, &WorkerClient::proposalReady, this, [this](const QJsonObject &proposal) {
         const auto current = m_adapter->snapshot();
-        if (current != m_snapshot || !validateProposal(current, proposal).isEmpty()) {
+        const auto validation = m_draftSpec.isEmpty() ? validateProposal(current, proposal) : validateDraftProposal(current, m_draftSpec, proposal);
+        if (current != m_snapshot || !validation.isEmpty()) {
             clearProposal();
             finishTasks(i18n("Outdated"));
             reply(i18n("The sequence changed. Send a message to request a new plan."));
             return;
         }
         m_proposal = proposal;
+        if (!m_draftSpec.isEmpty()) {
+            m_previewCard->setTitle(i18n("Revised draft"));
+            m_apply->setText(i18n("Replace draft"));
+        }
         const auto rate = current.value(QStringLiteral("frame_rate")).toObject();
         const double secondsPerFrame = double(rate.value(QStringLiteral("denominator")).toInt()) / rate.value(QStringLiteral("numerator")).toInt();
         int frames = 0;
@@ -442,7 +453,11 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
                                         "that the duration is fulfilled. Inspect the shot choices and review explanation, or request a refinement."));
             }
         }
-        reply(seconds + 0.1 < m_requestedSeconds
+        reply(!m_draftSpec.isEmpty()
+                  ? i18n("Your revised %1-shot draft is ready (%2 seconds, unchanged). Review the shots above, then Replace draft. One Undo restores the "
+                         "previous version.",
+                         index, QString::number(seconds, 'f', 1))
+              : seconds + 0.1 < m_requestedSeconds
                   ? i18n("I’ve proposed %1 shots totaling %2 seconds of your requested %3. Review the available footage and shot "
                          "choices above, then apply or send a refinement.",
                          index, QString::number(seconds, 'f', 1), m_requestedSeconds)
@@ -719,14 +734,20 @@ Montaz::AssistantWidget::AssistantWidget(QWidget *parent)
         if (proposal.isEmpty()) return;
         const auto current = m_adapter->snapshot();
         m_applying = true;
-        const auto result = current == m_snapshot ? m_adapter->apply(proposal) : QStringLiteral("stale_proposal");
+        const bool replacing = !m_draftSpec.isEmpty();
+        const auto result = current != m_snapshot ? QStringLiteral("stale_proposal")
+                            : replacing           ? m_adapter->applyDraft(m_snapshot, m_draftSpec, proposal)
+                                                  : m_adapter->apply(proposal);
         m_applying = false;
         m_worker->recordApply(proposal.value(QStringLiteral("request_id")).toString(), result);
         clearProposal();
         setTask(2, i18n("Done"));
         setTask(3, result.isEmpty() ? i18n("Done") : i18n("Failed"));
         m_activeTask = -1;
-        reply(result.isEmpty()                              ? i18n("Edit appended to the timeline. Use Undo to revert the whole edit.")
+        reply(result.isEmpty()
+                  ? (replacing ? i18n("Draft replaced. One Undo restores the previous shots. Music, captions and neighboring edits keep their timing.")
+                               : i18n("Edit added. Send a refinement to revise this draft; New brief creates a separate edit. Add music, then Align cuts "
+                                      "before Match cut or captions."))
               : result == QStringLiteral("rollback_failed") ? i18n("The edit could not be fully reverted. Reopen the project before trying again.")
                                                             : i18n("Edit could not be applied. Send a message to request a new plan."));
     });
@@ -790,6 +811,15 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
     m_contextKey = m_adapter->contextKey();
     m_requestedSeconds = m_duration->value();
     QJsonObject context;
+    if (!qEnvironmentVariableIsSet("MONTAZ_ASSISTANT_DEMO") && !m_brief.isEmpty() && m_adapter->hasDraft()) {
+        m_draftSpec = m_adapter->draftRequest();
+        if (m_draftSpec.isEmpty()) {
+            m_chat->setBusy(false);
+            reply(i18n("This draft was edited, locked, or given effects, so automatic replacement is unavailable. Keep your changes, or undo them before "
+                       "refining. New brief creates a separate edit."));
+            return;
+        }
+    }
     if (!qEnvironmentVariableIsSet("MONTAZ_ASSISTANT_DEMO")) {
         const auto sources = m_adapter->mediaSources(m_snapshot);
         if (sources.isEmpty()) {
@@ -801,6 +831,7 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
                    {QStringLiteral("brief"), QJsonObject{{QStringLiteral("duration_seconds"), m_requestedSeconds},
                                                          {QStringLiteral("recipe"), m_recipe->currentData().toString()},
                                                          {QStringLiteral("instruction"), brief}}}};
+        if (!m_draftSpec.isEmpty()) context[QStringLiteral("draft")] = m_draftSpec;
     }
     if (m_snapshot.isEmpty() || !m_worker->start(m_snapshot, context)) {
         m_chat->setBusy(false);
@@ -813,8 +844,11 @@ void Montaz::AssistantWidget::planEdit(const QString &message)
         setTask(row, i18n("Waiting"));
     m_activeTask = 0;
     setTask(0, i18n("Working"));
-    reply(i18n("I’ll analyze your footage, arrange a visual story, and show the proposed shots. Apply appends them as one undoable edit. Use Add music after "
-               "applying, and Captions when original speech audio is on the timeline."));
+    reply(
+        m_draftSpec.isEmpty()
+            ? i18n("I’ll arrange a visual story and show the proposed shots. Apply adds one undoable edit. Add music, then Align cuts before Match cut or "
+                   "captions.")
+            : i18n("I’ll revise this draft within its exact current duration. Review the new shots, then Replace draft. One Undo restores the previous edit."));
     m_status->setText(i18n("Analyzing footage…"));
 }
 
@@ -853,6 +887,7 @@ void Montaz::AssistantWidget::finishTasks(const QString &status)
 void Montaz::AssistantWidget::clearProposal()
 {
     m_proposal = {};
+    m_draftSpec = {};
     m_matchSpec = {};
     m_matchReview = {};
     m_matchPreview->hide();

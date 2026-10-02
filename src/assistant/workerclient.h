@@ -74,6 +74,7 @@ private:
     int m_progressCompleted{0};
     int m_progressCached{0};
     bool m_mediaRequest{false};
+    QJsonObject m_draftSpec;
     bool m_planningProgressReceived{false};
     bool m_reviewingProgressReceived{false};
     bool m_ready{false};

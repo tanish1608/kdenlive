@@ -102,7 +102,8 @@ def main() -> int:
         line = sys.stdin.buffer.readline(MAX_MESSAGE_BYTES + 1)
         request = decode(line)
         keys = {"version", "type", "request_id", "snapshot"}
-        real = request.get("type") == "plan_media"
+        revising = request.get("type") == "revise_media"
+        real = request.get("type") in {"plan_media", "revise_media"}
         effect = request.get("type") == "compose_effect"
         musical = request.get("type") in {"compose_music", "compose_effect"}
         timing = request.get("type") == "refine_timing"
@@ -121,6 +122,8 @@ def main() -> int:
             if timing
             else keys | {"effect" if effect else "music"}
             if musical
+            else keys | {"sources", "brief", "draft"}
+            if revising
             else keys | {"sources", "brief"}
             if real
             else keys,
@@ -133,6 +136,7 @@ def main() -> int:
                 "propose_match",
                 "plan_demo",
                 "plan_media",
+                "revise_media",
                 "compose_music",
                 "compose_effect",
                 "refine_timing",
@@ -314,6 +318,7 @@ def main() -> int:
                 media,
                 progress,
                 reviews.append,
+                draft=request["draft"] if revising else None,
             )
         else:
             proposal = propose_demo(snapshot, request_id)

@@ -35,6 +35,7 @@ def review_draft(
     media: MediaTools,
     *,
     target_frames: int | None = None,
+    placement: dict | None = None,
 ) -> tuple[dict, dict]:
     """Keep a validated draft available on review failure, explicitly unreviewed.
 
@@ -45,7 +46,9 @@ def review_draft(
     or provider-selected editor operations.
     """
     media.check()
-    original = proposal_from_plan(snapshot, request_id, draft, evidence, brief)
+    original = proposal_from_plan(
+        snapshot, request_id, draft, evidence, brief, placement=placement
+    )
     total = sum(op.duration_frames for op in original.operations)
     repair_duration = (
         target_frames is not None and total * 100 < target_frames * UNDERFILL_PERCENT
@@ -114,7 +117,9 @@ def review_draft(
                 raise AssistantError("invalid_review")
             return draft, dict(status="kept", reason=result["reason"], code="none")
         revised = dict(shots=result["shots"])
-        candidate = proposal_from_plan(snapshot, request_id, revised, evidence, brief)
+        candidate = proposal_from_plan(
+            snapshot, request_id, revised, evidence, brief, placement=placement
+        )
         candidate_total = sum(op.duration_frames for op in candidate.operations)
         duration_valid = (
             total <= candidate_total <= target_frames

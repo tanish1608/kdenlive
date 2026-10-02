@@ -18,6 +18,7 @@
 
 #include <KLocalizedString>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -59,6 +60,8 @@ void Montaz::EditorAdapter::bind()
     m_connections.clear();
     m_document = document;
     m_timeline = timeline;
+    m_draft = {};
+    m_draftSources = {};
     invalidate();
     if (!document || !timeline) return;
     m_connections << connect(timeline.get(), &QAbstractItemModel::dataChanged, this, [this](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
@@ -158,6 +161,115 @@ QJsonObject Montaz::EditorAdapter::mediaSources(const QJsonObject &context, cons
     return sources;
 }
 
+namespace {
+QJsonObject draftSourceIdentity(const QJsonArray &clips)
+{
+    QJsonObject sources;
+    for (const auto v : clips) {
+        const auto binId = v.toObject().value("bin_id").toString();
+        const auto source = pCore->projectItemModel()->getClipByBinID(binId);
+        if (!source) return {};
+        const QFileInfo file(source->clipUrl());
+        sources[binId] = QJsonArray{source->clipUrl(), file.size(), file.lastModified().toMSecsSinceEpoch(), source->getFramePlaytime()};
+    }
+    return sources;
+}
+} // namespace
+
+bool Montaz::EditorAdapter::hasDraft()
+{
+    bind();
+    return !m_draft.isEmpty();
+}
+
+QJsonObject Montaz::EditorAdapter::draftRequest()
+{
+    const auto current = snapshot();
+    const auto timeline = m_timeline.lock();
+    if (!timeline || m_draft.isEmpty() || !validateDraftRequest(current, m_draft).isEmpty() || timeline->getCompositionsCount() ||
+        draftSourceIdentity(m_draft.value("clips").toArray()) != m_draftSources)
+        return {};
+    for (const auto v : m_draft.value("clips").toArray()) {
+        const auto c = v.toObject();
+        const int id = c.value("instance_id").toString().toInt();
+        if (!timeline->isClip(id) || timeline->getClipBinId(id) != c.value("bin_id").toString() || timeline->getClipIn(id) != c.value("in_frame").toInt() ||
+            timeline->hasPersistentGroup(id) || timeline->hasClipEndMix(id) || timeline->getMixDuration(id) > 0 || timeline->getClipSpeed(id) != 1.0 ||
+            timeline->getClipEffectStackModel(id)->rowCount() || timeline->getClipState(id).first != PlaylistState::VideoOnly)
+            return {};
+        const auto asset = pCore->projectItemModel()->getClipByBinID(timeline->getClipBinId(id));
+        const int track = timeline->getClipTrackId(id);
+        if (!asset || asset->getEffectStack()->rowCount() || timeline->getTrackEffectStackModel(track)->rowCount() ||
+            (timeline->getTrackProperty(track, QStringLiteral("hide")).toInt() & 1))
+            return {};
+    }
+    return m_draft;
+}
+
+void Montaz::EditorAdapter::commitDraft(const QJsonArray &clips, const UndoFunction &undo, const UndoFunction &redo, const QString &label)
+{
+    const auto key = contextKey();
+    const auto previous = m_draft, previousSources = m_draftSources;
+    const QJsonObject next{{"clips", clips}};
+    const auto nextSources = draftSourceIdentity(clips);
+    const QPointer<EditorAdapter> guard(this);
+    auto restore = [guard, key](const QJsonObject &draft, const QJsonObject &sources) {
+        if (guard && guard->contextKey() == key) {
+            guard->m_draft = draft;
+            guard->m_draftSources = sources;
+        }
+    };
+    restore(next, nextSources);
+    pCore->pushUndo(
+        [undo, restore, previous, previousSources]() {
+            if (!undo()) return false;
+            restore(previous, previousSources);
+            return true;
+        },
+        [redo, restore, next, nextSources]() {
+            if (!redo()) return false;
+            restore(next, nextSources);
+            return true;
+        },
+        label);
+}
+
+QString Montaz::EditorAdapter::applyDraft(const QJsonObject &context, const QJsonObject &draft, const QJsonObject &proposal)
+{
+    if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
+    if (snapshot() != context || draftRequest() != draft || !validateDraftProposal(context, draft, proposal, m_appliedRequests).isEmpty())
+        return QStringLiteral("invalid_draft_revision");
+    const auto timeline = m_timeline.lock();
+    // Native group deletion includes every selected item. Clear temporary
+    // multi-selection before removing only the explicitly owned clip IDs.
+    timeline->requestClearSelection();
+    QJsonArray steps, inserted;
+    for (const auto v : draft.value("clips").toArray())
+        steps.append(QJsonObject{{"delete", v.toObject().value("instance_id")}});
+    for (const auto v : proposal.value("operations").toArray())
+        steps.append(v);
+    const auto result = applyInsertBatch(
+        steps,
+        [timeline, &inserted](const QJsonObject &op, UndoFunction &undo, UndoFunction &redo) {
+            if (op.contains("delete")) return timeline->requestItemDeletion(op.value("delete").toString().toInt(), undo, redo, false);
+            const int in = op.value("in_frame").toInt(), out = in + op.value("duration_frames").toInt() - 1;
+            int id = -1;
+            if (!timeline->requestClipInsertion(QStringLiteral("V%1/%2/%3").arg(op.value("bin_id").toString()).arg(in).arg(out),
+                                                op.value("track_id").toString().toInt(), op.value("start_frame").toInt(), id, false, true, false, undo, redo,
+                                                {}, 1) ||
+                id < 0)
+                return false;
+            auto owned = op;
+            owned["instance_id"] = QString::number(id);
+            inserted.append(owned);
+            return true;
+        },
+        [this, &inserted](const UndoFunction &undo, const UndoFunction &redo) { commitDraft(inserted, undo, redo, i18n("Revise assistant draft")); });
+    if (result.isEmpty()) m_appliedRequests.insert(proposal.value("request_id").toString());
+    if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
+    invalidate();
+    return result;
+}
+
 QString Montaz::EditorAdapter::apply(const QJsonObject &proposal)
 {
     if (QThread::currentThread() != thread()) return QStringLiteral("wrong_thread");
@@ -168,9 +280,10 @@ QString Montaz::EditorAdapter::apply(const QJsonObject &proposal)
     if (!timeline) return QStringLiteral("no_sequence");
     // Explicit A/V prefixes suppress implicit mirror insertion and track creation.
     // Every proposal operation names exactly one imported stream and target track.
+    QJsonArray inserted;
     const auto result = applyInsertBatch(
         proposal.value(QStringLiteral("operations")).toArray(),
-        [timeline](const QJsonObject &op, UndoFunction &undo, UndoFunction &redo) {
+        [timeline, &inserted](const QJsonObject &op, UndoFunction &undo, UndoFunction &redo) {
             const int track = op.value(QStringLiteral("track_id")).toString().toInt();
             const int in = op.value(QStringLiteral("in_frame")).toInt();
             const int out = in + op.value(QStringLiteral("duration_frames")).toInt() - 1;
@@ -178,10 +291,15 @@ QString Montaz::EditorAdapter::apply(const QJsonObject &proposal)
             const auto source =
                 prefix + op.value(QStringLiteral("bin_id")).toString() + QLatin1Char('/') + QString::number(in) + QLatin1Char('/') + QString::number(out);
             int id = -1;
-            return timeline->requestClipInsertion(source, track, op.value(QStringLiteral("start_frame")).toInt(), id, false, true, false, undo, redo, {}, 1) &&
-                   id >= 0;
+            if (!timeline->requestClipInsertion(source, track, op.value(QStringLiteral("start_frame")).toInt(), id, false, true, false, undo, redo, {}, 1) ||
+                id < 0)
+                return false;
+            auto owned = op;
+            owned["instance_id"] = QString::number(id);
+            inserted.append(owned);
+            return true;
         },
-        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Apply assistant edit")); });
+        [this, &inserted](const UndoFunction &undo, const UndoFunction &redo) { commitDraft(inserted, undo, redo, i18n("Apply assistant edit")); });
     if (result.isEmpty()) m_appliedRequests.insert(proposal.value(QStringLiteral("request_id")).toString());
     if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
     invalidate();
@@ -396,6 +514,7 @@ QString Montaz::EditorAdapter::applyTiming(const QJsonObject &context, const QJs
     if (m_appliedRequests.contains(request)) return QStringLiteral("already_applied");
     const auto timeline = m_timeline.lock();
     const auto originals = timing.value(QStringLiteral("clips")).toArray();
+    const bool ownsTiming = draftRequest().value(QStringLiteral("clips")) == timing.value(QStringLiteral("clips"));
     const auto operations = proposal.value(QStringLiteral("operations")).toArray();
     QJsonArray changed, steps;
     for (int i = 0; i < operations.size(); ++i)
@@ -422,7 +541,12 @@ QString Montaz::EditorAdapter::applyTiming(const QJsonObject &context, const QJs
             return timeline->requestItemResize(id, length, true, true, undo, redo) && length == requested &&
                    timeline->getClipIn(id) == step.value(QStringLiteral("in_frame")).toInt();
         },
-        [](const UndoFunction &undo, const UndoFunction &redo) { pCore->pushUndo(undo, redo, i18n("Align cuts to music")); });
+        [this, ownsTiming, operations](const UndoFunction &undo, const UndoFunction &redo) {
+            if (ownsTiming)
+                commitDraft(operations, undo, redo, i18n("Align cuts to music"));
+            else
+                pCore->pushUndo(undo, redo, i18n("Align cuts to music"));
+        });
     if (result.isEmpty()) m_appliedRequests.insert(request);
     if (result == QStringLiteral("rollback_failed")) m_applyHealthy = false;
     invalidate();

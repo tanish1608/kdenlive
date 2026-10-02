@@ -167,9 +167,21 @@ correspondence does not yet meet the desired accuracy. Combined validation passe
 200 Python, 39 transport/seven chat checks, full native tests and nine controlled
 exports, plus separate desktop Apply/Undo/Redo/save/reopen checks.
 
-Next Codex implementation: review/replace the assistant's own draft through native
-commands and make beat alignment precede object matching explicitly. Existing
-manual edits, audio and subtitles must survive. Next separately assignable Claude
-work: bounded cached-evidence candidate discovery as described above. Native zoom
-estimation remains a focused Codex follow-up before advertising reliable zooming
-matches. No later handoff has been started automatically.
+## October 2 progress
+
+Native fixed-seed scale registration is committed in `1e2e226`. Ten controlled
+zoom windows now pass the absolute checks; small zooms and real footage remain
+limited. Earlier October 1 metrics above are historical.
+
+- [x] Review/replace the last assistant draft through native commands, preserving
+  the exact span, manual neighbors, audio and subtitles; one Undo/Redo restores
+  both clip state and ownership.
+- [x] Show beat-before-match ordering explicitly and retain owned draft timing
+  after assistant beat alignment.
+- [ ] Manual object-anchor review with typed native scope and tracking gates.
+- [ ] Bounded cached-evidence candidate discovery, after a separate Claude handoff.
+- [ ] Grounded whips/wipes, then native ramps and the completion audit above.
+
+See [draft revision evidence](draft-revision.md). Draft ownership is session-only;
+save/reopen preserves the edit but does not authorize replacing saved clips.
+No later Claude handoff has been started automatically.

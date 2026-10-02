@@ -104,6 +104,77 @@ QString Montaz::validateSnapshot(const QJsonObject &snapshot)
     return {};
 }
 
+QString Montaz::validateDraftRequest(const QJsonObject &snapshot, const QJsonObject &draft)
+{
+    if (!validateSnapshot(snapshot).isEmpty() || !fields(draft, {QStringLiteral("clips")}) || !draft.value("clips").isArray()) return invalid();
+    const auto clips = draft.value("clips").toArray();
+    if (clips.isEmpty() || clips.size() > 256) return invalid();
+    QMap<QString, QJsonObject> occupied, assets, tracks;
+    for (const auto v : snapshot.value("occupied").toArray())
+        occupied.insert(v.toObject().value("instance_id").toString(), v.toObject());
+    for (const auto v : snapshot.value("assets").toArray())
+        assets.insert(v.toObject().value("bin_id").toString(), v.toObject());
+    for (const auto v : snapshot.value("tracks").toArray())
+        tracks.insert(v.toObject().value("track_id").toString(), v.toObject());
+    QSet<QString> seen;
+    qint64 end = -1;
+    QString target;
+    for (const auto v : clips) {
+        const auto c = v.toObject();
+        if (!fields(c, {"instance_id", "bin_id", "track_id", "start_frame", "in_frame", "duration_frames"}) || !editorId(c.value("instance_id")) ||
+            !identifier(c.value("bin_id")) || !editorId(c.value("track_id")) || !range(c, "start_frame") || !range(c, "in_frame"))
+            return invalid();
+        const auto id = c.value("instance_id").toString(), trackId = c.value("track_id").toString();
+        const auto old = occupied.value(id), asset = assets.value(c.value("bin_id").toString()), track = tracks.value(trackId);
+        if (old.isEmpty() || asset.isEmpty() || track.isEmpty() || seen.contains(id) || track.value("locked").toBool() ||
+            track.value("kind") != QStringLiteral("video") || !asset.value("has_video").toBool() ||
+            c.value("in_frame").toInteger() + c.value("duration_frames").toInteger() > asset.value("duration_frames").toInteger() ||
+            (end >= 0 && (end != c.value("start_frame").toInteger() || target != trackId)))
+            return invalid();
+        for (const auto &key : {"track_id", "start_frame", "duration_frames"})
+            if (c.value(key) != old.value(key)) return invalid();
+        seen.insert(id);
+        target = trackId;
+        end = c.value("start_frame").toInteger() + c.value("duration_frames").toInteger();
+    }
+    return {};
+}
+
+QJsonObject Montaz::draftPlanningSnapshot(const QJsonObject &snapshot, const QJsonObject &draft)
+{
+    if (!validateDraftRequest(snapshot, draft).isEmpty()) return {};
+    QSet<QString> ids;
+    for (const auto v : draft.value("clips").toArray())
+        ids.insert(v.toObject().value("instance_id").toString());
+    QJsonArray occupied;
+    for (const auto v : snapshot.value("occupied").toArray())
+        if (!ids.contains(v.toObject().value("instance_id").toString())) occupied.append(v);
+    auto planning = snapshot;
+    planning["occupied"] = occupied;
+    return planning;
+}
+
+QString Montaz::validateDraftProposal(const QJsonObject &snapshot, const QJsonObject &draft, const QJsonObject &proposal, const QSet<QString> &appliedRequests)
+{
+    const auto planning = draftPlanningSnapshot(snapshot, draft);
+    const auto error = validateProposal(planning, proposal, appliedRequests);
+    if (!error.isEmpty()) return error;
+    const auto clips = draft.value("clips").toArray();
+    const auto first = clips.first().toObject(), last = clips.last().toObject();
+    qint64 position = first.value("start_frame").toInteger();
+    QSet<QString> existing;
+    for (const auto v : snapshot.value("occupied").toArray())
+        existing.insert(v.toObject().value("instance_id").toString());
+    for (const auto v : proposal.value("operations").toArray()) {
+        const auto op = v.toObject();
+        if (op.value("track_id") != first.value("track_id") || op.value("start_frame").toInteger() != position ||
+            existing.contains(op.value("instance_id").toString()))
+            return invalid();
+        position += op.value("duration_frames").toInteger();
+    }
+    return position == last.value("start_frame").toInteger() + last.value("duration_frames").toInteger() ? QString() : invalid();
+}
+
 QString Montaz::validateEditorialReview(const QJsonObject &snapshot, const QJsonObject &proposal, const QJsonObject &review)
 {
     if (!fields(review, {QStringLiteral("requested_frames"), QStringLiteral("available_frames"), QStringLiteral("skipped_assets"), QStringLiteral("shots"),

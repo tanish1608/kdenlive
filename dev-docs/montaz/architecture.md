@@ -25,6 +25,21 @@ are input media references, never edit operations. They stay out of run logs.
 `plan_demo` retains the deterministic integration diagnostic. Both return the
 same insertion proposal and require a clean worker exit before Apply.
 
+`revise_media` adds an editor-issued `draft` scope to the same visual request.
+The adapter retains the last applied draft's native IDs, source trims and
+path/size/mtime/conformed-duration identity in memory. Python removes only that
+scope from planning occupancy, targets its exact start/track/end and returns
+v1 insertions with fresh proposal IDs. Both transport and adapter validate the
+replacement against the original snapshot. The model cannot name deletions.
+Native deletion/insertion forms one rollback-capable Undo, restoring ownership
+alongside clip state. Temporary multi-selection is cleared before deletion to
+prevent native group deletion from affecting neighbors. Edited/effected/grouped
+drafts are ineligible; audio, subtitles and unrelated clips remain untouched.
+Ownership clears on sequence/project switch or reopen and is not inferred from
+a saved project's clips. Native assistant retiming updates the owned ledger.
+Source identity here is a local metadata fingerprint, not a content checksum;
+visual analysis uses its separate content-addressed cache.
+
 `compose_music` is a separate resource request. The adapter issues an immutable
 video span, free audio track and unique WAV destination beside the saved project.
 The worker returns that same context, path, exact project-frame duration and
@@ -136,7 +151,8 @@ and the original total duration, except that drafts below 85% of a locally
 reachable target may grow toward that target in the same review call. The target
 uses interval unions over one allowed window per distinct source, with the same
 recipe floors/ceilings as validation. Restrictive briefs may retain shorter edits
-with an explanation. Review cannot modify an already applied edit.
+with an explanation. Review cannot directly modify an already applied edit;
+an explicit reviewed `revise_media` request uses the native replacement path.
 Oversized context skips review; provider/parse/invalid-revision failures explicitly
 retain an unreviewed original draft. Cancellation never takes that fallback.
 

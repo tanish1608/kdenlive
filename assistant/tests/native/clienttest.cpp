@@ -992,6 +992,62 @@ EXIT
         QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 5000);
         QVERIFY(ready[0][0].toJsonObject()["request_id"] != ready[1][0].toJsonObject()["request_id"]);
     }
+    void draftRevisionTransportRejectsAppendEscapesShorteningAndLateExit()
+    {
+        auto context = snapshot();
+        context["occupied"] = QJsonArray{QJsonObject{{"instance_id", "10"}, {"track_id", "1"}, {"start_frame", 0}, {"duration_frames", 60}},
+                                         QJsonObject{{"instance_id", "20"}, {"track_id", "2"}, {"start_frame", 0}, {"duration_frames", 180}}};
+        auto clip = operation();
+        clip["instance_id"] = "10";
+        const QJsonObject spec{{"clips", QJsonArray{clip}}};
+        QJsonObject sources;
+        for (int i = 1; i <= 6; ++i)
+            sources[QString::number(i)] = QStringLiteral("/private/source%1.mp4").arg(i);
+        const QJsonObject brief{{"duration_seconds", 2}, {"recipe", "postcard"}, {"instruction", "private revision instruction"}};
+        const QByteArray script = R"PY(import json,sys
+r=json.loads(sys.stdin.readline())
+assert r['type']=='revise_media' and r['draft']['clips'][0]['instance_id']=='10'
+def send(value): print(json.dumps({'version':1,**value}),flush=True)
+send({'type':'ready'})
+for n in (1,2):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==1 else 'planner','status':'running','reason':''})
+for phase in ('analysis','planning','reviewing'):
+    send({'type':'progress','phase':phase,'completed':6,'cached':6,'total':6,'model':'gemini-test'})
+for n in (3,4):
+    send({'type':'event','run_id':r['request_id'],'sequence':n,'stage':None if n==4 else 'planner','status':'completed','reason':''})
+s=r['snapshot']
+p={'request_id':r['request_id'],'project_id':s['project_id'],'sequence_id':s['sequence_id'],
+   'base_revision':s['revision'],'frame_rate':s['frame_rate'],'protocol_version':1,
+   'operations':[{'instance_id':'new:0','bin_id':'2','track_id':'1','start_frame':0,'in_frame':1,'duration_frames':60}]}
+FAULT
+review={'requested_frames':60,'available_frames':300,'skipped_assets':5,
+        'assessment':{'status':'kept','reason':'Observed alternate opening','code':'none'},
+        'shots':[{'instance_id':'new:0','role':'detail','quality':80,'reason':'Observed alternate opening'}]}
+send({'type':'proposal','proposal':p,'review':review})
+EXIT
+)PY";
+        for (int fault = 0; fault < 5; ++fault) {
+            auto worker = script;
+            worker.replace("FAULT", fault == 1   ? "p['operations'][0]['start_frame']=180"
+                                    : fault == 2 ? "p['operations'][0]['duration_frames']=59"
+                                    : fault == 3 ? "p['operations'][0]['track_id']='2'"
+                                                 : "pass");
+            worker.replace("EXIT", fault == 4 ? "sys.exit(7)" : "pass");
+            QTemporaryDir temp;
+            fakeWorker(temp.path(), worker);
+            Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), temp.path());
+            QSignalSpy ready(&client, &Montaz::WorkerClient::proposalReady), failures(&client, &Montaz::WorkerClient::failed);
+            QVERIFY(client.start(context, {{"sources", sources}, {"brief", brief}, {"draft", spec}}));
+            QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 5000);
+            QCOMPARE(ready.count(), fault == 0 ? 1 : 0);
+            QCOMPARE(failures.count(), fault == 0 ? 0 : 1);
+        }
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), QStringLiteral("/unavailable"));
+        auto stale = spec;
+        clip["start_frame"] = 1;
+        stale["clips"] = QJsonArray{clip};
+        QVERIFY(!client.start(context, {{"sources", sources}, {"brief", brief}, {"draft", stale}}));
+    }
     void editorialMetadataRequiresMatchingShotsAndCleanExit()
     {
         const QByteArray script = R"PY(import json,sys

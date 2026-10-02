@@ -19,6 +19,7 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
 8. [Engineering collaboration](collaboration.md): Claude's scoped assignment, isolated branch, validation and Codex review/merge workflow.
 9. [Completion plan](completion-plan.md): current Codex/Claude ownership, immediate checklists and finish criteria.
 10. [Music timing](music-timing.md): conservative beat estimates, accent fallback, caching and native export checks.
+11. [Draft revisions](draft-revision.md): native ownership, replacement, Undo and preservation checks.
 
 ## Current state
 
@@ -35,6 +36,10 @@ travel recipes, and ElevenLabs music/effects. Kdenlive remains the editor.
   Shift+Enter inserts a line. Refinements reuse the current brief, New brief
   clears it, and changing project/sequence clears session-only conversation.
   The task list distinguishes active work, review, Stop, failure and application.
+- Follow-ups after Apply can **Replace draft** within the same exact span through
+  one native Undo. Manual edits/effects/groups make replacement unavailable;
+  neighbors, audio and subtitles are preserved. Ownership is session-only.
+  The panel guides story → music → Align cuts → Match cut → captions.
 - Compiled and exercised behind `BUILD_MONTAZ_ASSISTANT=ON`:
   dock, sequence snapshot/revision bridge, proposal list, and undoable application
   through Kdenlive's own insertion API. It is disabled in default builds.

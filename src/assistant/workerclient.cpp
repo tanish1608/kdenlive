@@ -54,6 +54,8 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
 {
     if (m_busy || !validateSnapshot(snapshot).isEmpty()) return false;
     m_snapshot = snapshot;
+    m_draftSpec = context.value(QStringLiteral("draft")).toObject();
+    if (context.contains(QStringLiteral("draft")) && !validateDraftRequest(snapshot, m_draftSpec).isEmpty()) return false;
     m_requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const auto cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     const auto logDirectory = cache + QStringLiteral("/montaz/runs");
@@ -93,17 +95,18 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     m_planningProgressReceived = false;
     m_reviewingProgressReceived = false;
     m_progressCompleted = m_progressCached = 0;
-    QJsonObject request{{QStringLiteral("version"), 1},
-                        {QStringLiteral("type"), m_matchRequest     ? QStringLiteral("propose_match")
-                                                 : m_captionRequest ? QStringLiteral("propose_captions")
-                                                 : m_cueRequest     ? QStringLiteral("suggest_sounds")
-                                                 : m_timingRequest  ? QStringLiteral("refine_timing")
-                                                 : m_effectRequest  ? QStringLiteral("compose_effect")
-                                                 : m_musicRequest   ? QStringLiteral("compose_music")
-                                                 : m_mediaRequest   ? QStringLiteral("plan_media")
-                                                                    : QStringLiteral("plan_demo")},
-                        {QStringLiteral("request_id"), m_requestId},
-                        {QStringLiteral("snapshot"), snapshot}};
+    QJsonObject request{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("type"), m_matchRequest     ? QStringLiteral("propose_match")
+                                 : m_captionRequest ? QStringLiteral("propose_captions")
+                                 : m_cueRequest     ? QStringLiteral("suggest_sounds")
+                                 : m_timingRequest  ? QStringLiteral("refine_timing")
+                                 : m_effectRequest  ? QStringLiteral("compose_effect")
+                                 : m_musicRequest   ? QStringLiteral("compose_music")
+                                 : m_mediaRequest ? (context.contains(QStringLiteral("draft")) ? QStringLiteral("revise_media") : QStringLiteral("plan_media"))
+                                                  : QStringLiteral("plan_demo")},
+        {QStringLiteral("request_id"), m_requestId},
+        {QStringLiteral("snapshot"), snapshot}};
     if (m_matchRequest) {
         if (context.size() != 2 || !context.value("sources").isObject() || !validateMatchRequest(snapshot, m_matchSpec).isEmpty()) return false;
         QSet<QString> bins;
@@ -147,9 +150,12 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
             return false;
         request.insert(m_effectRequest ? QStringLiteral("effect") : QStringLiteral("music"), m_musicSpec);
     } else if (m_mediaRequest) {
-        if (context.size() != 2 || !context.value(QStringLiteral("sources")).isObject() || !context.value(QStringLiteral("brief")).isObject()) return false;
+        if (context.size() != (m_draftSpec.isEmpty() ? 2 : 3) || !context.value(QStringLiteral("sources")).isObject() ||
+            !context.value(QStringLiteral("brief")).isObject())
+            return false;
         request.insert(QStringLiteral("sources"), context.value(QStringLiteral("sources")));
         request.insert(QStringLiteral("brief"), context.value(QStringLiteral("brief")));
+        if (!m_draftSpec.isEmpty()) request.insert(QStringLiteral("draft"), m_draftSpec);
     }
     const auto line = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
     if (line.size() > MaxMessageBytes) return false;
@@ -420,6 +426,7 @@ void Montaz::WorkerClient::readOutput()
                                       QStringLiteral("no_video_track"),
                                       QStringLiteral("media_changed"),
                                       QStringLiteral("insufficient_footage"),
+                                      QStringLiteral("revision_unavailable"),
                                       QStringLiteral("media_unreadable"),
                                       QStringLiteral("media_timeout"),
                                       QStringLiteral("invalid_request"),
@@ -501,7 +508,8 @@ void Montaz::WorkerClient::readOutput()
                    m_ready && m_completed && m_proposal.isEmpty() && message.size() == (message.contains(QStringLiteral("review")) ? 4 : 3) &&
                    message.value(QStringLiteral("proposal")).isObject()) {
             const auto proposal = message.value(QStringLiteral("proposal")).toObject();
-            if (proposal.value(QStringLiteral("request_id")) != m_requestId || !validateProposal(m_snapshot, proposal).isEmpty()) {
+            const auto validation = m_draftSpec.isEmpty() ? validateProposal(m_snapshot, proposal) : validateDraftProposal(m_snapshot, m_draftSpec, proposal);
+            if (proposal.value(QStringLiteral("request_id")) != m_requestId || !validation.isEmpty()) {
                 abort(QStringLiteral("invalid_proposal"));
                 return;
             }

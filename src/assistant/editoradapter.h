@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 Montaz contributors
 #pragma once
 
+#include "editbatch.h"
+
 #include <QJsonObject>
 #include <QObject>
 #include <QPointer>
@@ -21,6 +23,9 @@ public:
     QString contextKey();
     QJsonObject snapshot();
     QJsonObject mediaSources(const QJsonObject &snapshot, const QSet<QString> &selected = {});
+    bool hasDraft();
+    QJsonObject draftRequest();
+    QString applyDraft(const QJsonObject &snapshot, const QJsonObject &draft, const QJsonObject &proposal);
     QJsonObject matchRequest();
     QString applyMatch(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);
     QJsonObject captionRequest();
@@ -43,11 +48,14 @@ private:
     void bind();
     void watchSubtitles(const std::shared_ptr<TimelineItemModel> &timeline);
     void invalidate();
+    void commitDraft(const QJsonArray &clips, const UndoFunction &undo, const UndoFunction &redo, const QString &label);
     QPointer<KdenliveDoc> m_document;
     std::weak_ptr<TimelineItemModel> m_timeline;
     QList<QMetaObject::Connection> m_connections;
     QSet<QString> m_appliedRequests;
     int m_revision{0};
     bool m_applyHealthy{true};
+    QJsonObject m_draft;
+    QJsonObject m_draftSources;
 };
 } // namespace Montaz

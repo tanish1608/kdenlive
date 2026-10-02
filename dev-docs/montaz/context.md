@@ -387,3 +387,20 @@ limits, so a direction-only result or a helper that silently rejects valid windo
 cannot pass. Real footage, deformation, occlusion and very small zooms remain
 uncalibrated; do not claim finished travel-film quality. See [stability evidence](match-stability-report.md)
 and the updated completion plan.
+
+## Native draft revision — October 2
+
+Follow-ups after Apply now request a reviewed in-place replacement of the last
+assistant draft. `revise_media` carries an editor-issued scope; Python returns
+v1 insertions in its exact track/start/end. Native deletion/insertion is one
+rollback-capable Undo, preserving neighboring clips, audio and subtitle events.
+Undo/Redo restores ownership with clip state; assistant beat retiming updates
+the ledger. Manual trims/moves, groups, locks, effects and changed source identity
+refuse replacement. Ownership is session-only and clears on switch/reopen.
+New brief remains a separate appended edit; demo mode is append-only.
+
+The panel explicitly guides story → music → Align cuts → Match cut → captions.
+Existing effect/subtitle timing gates stay strict. Manual anchor review and
+bounded candidate discovery are the next open parts of milestone 2, followed by
+measured whips/wipes and native ramps. See [draft revision evidence](draft-revision.md)
+for checks and remaining limits; no new Claude handoff was sent automatically.

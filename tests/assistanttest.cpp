@@ -132,9 +132,158 @@ TEST_CASE("Assistant applies six video inserts in one undoable batch", "[Montaz]
     pCore->projectManager()->testSetDocument(nullptr);
 }
 
+TEST_CASE("Assistant replaces only its last draft with atomic native undo", "[Montaz]")
+{
+    QTemporaryDir temporary;
+    auto bin = pCore->projectItemModel();
+    bin->clean();
+    auto stack = std::make_shared<DocUndoStack>(nullptr);
+    KdenliveDoc document(stack);
+    document.setUrl(QUrl::fromLocalFile(temporary.filePath(QStringLiteral("draft.kdenlive"))));
+    document.setDocumentProperty(QStringLiteral("documentid"), document.uuid().toString(QUuid::WithoutBraces));
+    pCore->projectManager()->testSetDocument(&document);
+    const auto previousProfile = pCore->getCurrentProfilePath();
+    REQUIRE(pCore->setCurrentProfile(QStringLiteral("atsc_1080p_2997")));
+    auto timeline = TimelineItemModel::construct(document.uuid(), stack);
+    pCore->projectManager()->testSetActiveTimeline(timeline);
+    int video = -1, audio = -1;
+    REQUIRE(timeline->requestTrackInsertion(-1, video));
+    REQUIRE(timeline->requestTrackInsertion(-1, audio, QString(), true));
+    {
+        const auto source = KdenliveTests::createProducerWithSound(pCore->getProjectProfile(), bin, 300);
+        int before = -1, after = -1, music = -1;
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/9").arg(source), video, 0, before));
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/0/29").arg(source), video, 150, after));
+        const auto musicPath = temporary.filePath(QStringLiteral("preserved.wav"));
+        writeMusicWave(musicPath, 10);
+        auto audioProducer = std::make_shared<Mlt::Producer>(pCore->getProjectProfile(), "avformat", musicPath.toUtf8().constData());
+        REQUIRE(audioProducer->is_valid());
+        QString audioSource;
+        Fun audioUndo = []() { return true; }, audioRedo = []() { return true; };
+        REQUIRE(bin->requestAddBinClip(audioSource, audioProducer, QStringLiteral("-1"), audioUndo, audioRedo));
+        REQUIRE(timeline->requestClipInsertion(QStringLiteral("A%1/0/239").arg(audioSource), audio, 0, music));
+        stack->clear();
+        Montaz::EditorAdapter adapter;
+        auto proposalFor = [&](const QString &request, const QJsonArray &operations) {
+            const auto context = adapter.snapshot();
+            return QJsonObject{{"request_id", request},
+                               {"project_id", context.value("project_id")},
+                               {"sequence_id", context.value("sequence_id")},
+                               {"base_revision", context.value("revision")},
+                               {"frame_rate", context.value("frame_rate")},
+                               {"protocol_version", 1},
+                               {"operations", operations}};
+        };
+        QJsonArray initial;
+        for (int i = 0; i < 2; ++i)
+            initial.append(QJsonObject{{"instance_id", QStringLiteral("first:%1").arg(i)},
+                                       {"bin_id", source},
+                                       {"track_id", QString::number(video)},
+                                       {"start_frame", 30 + i * 60},
+                                       {"in_frame", i * 10},
+                                       {"duration_frames", 60}});
+        REQUIRE(adapter.apply(proposalFor(QStringLiteral("first"), initial)).isEmpty());
+        REQUIRE(stack->count() == 1);
+        const auto originalDraft = adapter.draftRequest();
+        REQUIRE_FALSE(originalDraft.isEmpty());
+        REQUIRE(timeline->checkConsistency());
+        const auto model = timeline->createSubtitleModel();
+        Fun subtitleUndo = []() { return true; }, subtitleRedo = []() { return true; };
+        const double fps = pCore->getCurrentFps();
+        const SubtitleEvent event(true, GenTime(90, fps), model->getLayerDefaultStyle(0), QString(), 0, 0, 0, QString(), QStringLiteral("Preserved words"));
+        REQUIRE(model->addSubtitle({0, GenTime(45, fps)}, event, subtitleUndo, subtitleRedo));
+        const auto subtitleId = model->getSubtitleIdFromIndex(0);
+        const auto original = adapter.snapshot();
+        QJsonArray revised;
+        for (int i = 0; i < 3; ++i)
+            revised.append(QJsonObject{{"instance_id", QStringLiteral("revised:%1").arg(i)},
+                                       {"bin_id", source},
+                                       {"track_id", QString::number(video)},
+                                       {"start_frame", 30 + i * 40},
+                                       {"in_frame", 90 - i * 20},
+                                       {"duration_frames", 40}});
+        const auto proposal = proposalFor(QStringLiteral("revised"), revised);
+        SECTION("Replace, selection safety, ownership, undo redo and serialization")
+        {
+            const auto firstId = originalDraft.value("clips").toArray().first().toObject().value("instance_id").toString().toInt();
+            REQUIRE(timeline->requestSetSelection({firstId, after}));
+            const auto context = adapter.snapshot();
+            auto currentProposal = proposal;
+            currentProposal["base_revision"] = context.value("revision");
+            REQUIRE(adapter.applyDraft(context, originalDraft, currentProposal).isEmpty());
+            REQUIRE(stack->count() == 2);
+            REQUIRE(timeline->getTrackClipsCount(video) == 5);
+            REQUIRE(timeline->getClipByPosition(video, 0) == before);
+            REQUIRE(timeline->getClipByPosition(video, 150) == after);
+            REQUIRE(timeline->getClipByPosition(audio, 0) == music);
+            REQUIRE(timeline->getClipPlaytime(music) == 240);
+            REQUIRE(model->getSubtitleIdFromIndex(0) == subtitleId);
+            REQUIRE(model->getAllSubtitles().first().second.text() == QStringLiteral("Preserved words"));
+            const auto applied = adapter.snapshot().value("occupied");
+            const auto revisedDraft = adapter.draftRequest();
+            REQUIRE(revisedDraft.value("clips").toArray().size() == 3);
+            REQUIRE_FALSE(adapter.applyDraft(context, originalDraft, currentProposal).isEmpty());
+            stack->undo();
+            REQUIRE(adapter.snapshot().value("occupied") == original.value("occupied"));
+            REQUIRE(adapter.draftRequest() == originalDraft);
+            stack->redo();
+            REQUIRE(adapter.snapshot().value("occupied") == applied);
+            REQUIRE(adapter.draftRequest() == revisedDraft);
+            const auto scene = temporary.filePath(QStringLiteral("revised.mlt"));
+            {
+                Mlt::Consumer serializer(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+                REQUIRE(serializer.is_valid());
+                serializer.connect(*timeline->tractor());
+                serializer.run();
+            }
+            Mlt::Producer reopened(pCore->getProjectProfile(), "xml", scene.toUtf8().constData());
+            REQUIRE(reopened.is_valid());
+            REQUIRE(reopened.get_length() >= 240);
+        }
+        SECTION("Manual trim, locks and stale reviews refuse replacement")
+        {
+            const int id = originalDraft.value("clips").toArray().first().toObject().value("instance_id").toString().toInt();
+            REQUIRE(timeline->requestItemResize(id, 59, true) == 59);
+            REQUIRE(adapter.draftRequest().isEmpty());
+            const auto edited = adapter.snapshot().value("occupied");
+            REQUIRE_FALSE(adapter.applyDraft(original, originalDraft, proposal).isEmpty());
+            REQUIRE(adapter.snapshot().value("occupied") == edited);
+            stack->undo();
+            REQUIRE_FALSE(adapter.draftRequest().isEmpty());
+            timeline->setTrackLockedState(video, true);
+            REQUIRE(adapter.draftRequest().isEmpty());
+            timeline->setTrackLockedState(video, false);
+            REQUIRE_FALSE(adapter.applyDraft(original, originalDraft, proposal).isEmpty());
+        }
+        SECTION("Shortened and escaping revisions cannot delete any original clip")
+        {
+            for (const auto &change :
+                 {QJsonObject{{"duration_frames", 39}}, QJsonObject{{"track_id", QString::number(audio)}}, QJsonObject{{"in_frame", 300}}}) {
+                auto invalid = proposal;
+                auto operations = revised;
+                auto last = operations.last().toObject();
+                for (auto it = change.begin(); it != change.end(); ++it)
+                    last[it.key()] = it.value();
+                operations[operations.size() - 1] = last;
+                invalid["operations"] = operations;
+                REQUIRE_FALSE(adapter.applyDraft(original, originalDraft, invalid).isEmpty());
+                REQUIRE(adapter.snapshot().value("occupied") == original.value("occupied"));
+                REQUIRE(stack->count() == 1);
+            }
+        }
+        stack->clear();
+    }
+    pCore->taskManager.slotCancelJobs();
+    document.closing = true;
+    bin->clean();
+    pCore->projectManager()->testSetDocument(nullptr);
+    if (!previousProfile.isEmpty()) pCore->setCurrentProfile(previousProfile);
+}
+
 TEST_CASE("Assistant refines existing cuts with native identities and atomic undo", "[Montaz]")
 {
     const bool rhythmic = GENERATE(false, true);
+    const bool owned = GENERATE(false, true);
     QTemporaryDir temporary;
     auto bin = pCore->projectItemModel();
     bin->clean();
@@ -152,11 +301,35 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
         const auto fps = pCore->getProjectFpsInfo();
         const int shot = int(2.0 * fps.first / fps.second);
         const auto source = KdenliveTests::createProducerWithSound(pCore->getProjectProfile(), bin, shot * 4);
+        Montaz::EditorAdapter adapter;
         std::vector<int> ids;
+        QJsonArray initial;
         for (int i = 0; i < 3; ++i) {
-            int id = -1;
-            REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/5/%2").arg(source).arg(shot + 4), video, 20 + i * shot, id));
-            ids.push_back(id);
+            if (owned) {
+                initial.append(QJsonObject{{"instance_id", QStringLiteral("owned:%1").arg(i)},
+                                           {"bin_id", source},
+                                           {"track_id", QString::number(video)},
+                                           {"start_frame", 20 + i * shot},
+                                           {"in_frame", 5},
+                                           {"duration_frames", shot}});
+            } else {
+                int id = -1;
+                REQUIRE(timeline->requestClipInsertion(QStringLiteral("V%1/5/%2").arg(source).arg(shot + 4), video, 20 + i * shot, id));
+                ids.push_back(id);
+            }
+        }
+        if (owned) {
+            const auto context = adapter.snapshot();
+            const QJsonObject first{{"request_id", QStringLiteral("owned-timing")},
+                                    {"project_id", context.value("project_id")},
+                                    {"sequence_id", context.value("sequence_id")},
+                                    {"base_revision", context.value("revision")},
+                                    {"frame_rate", context.value("frame_rate")},
+                                    {"protocol_version", 1},
+                                    {"operations", initial}};
+            REQUIRE(adapter.apply(first).isEmpty());
+            for (int i = 0; i < 3; ++i)
+                ids.push_back(timeline->getClipByPosition(video, 20 + i * shot));
         }
         const QString musicPath = temporary.filePath(QStringLiteral("music.wav"));
         writeMusicWave(musicPath, 8);
@@ -169,8 +342,9 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
         int musicClip = -1;
         REQUIRE(timeline->requestClipInsertion(QStringLiteral("A%1/0/%2").arg(musicId).arg(shot * 3 - 1), audio, 20, musicClip));
         stack->clear();
-        Montaz::EditorAdapter adapter;
         const auto context = adapter.snapshot(), timing = adapter.timingRequest();
+        const auto draftBefore = adapter.draftRequest();
+        REQUIRE(adapter.hasDraft() == owned);
         REQUIRE_FALSE(timing.isEmpty());
         auto operations = timing.value(QStringLiteral("clips")).toArray();
         for (int i = 0; i < 3; ++i) {
@@ -233,6 +407,7 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
         {
             const int assets = bin->getAllClipIds().size();
             REQUIRE(adapter.applyTiming(context, timing, proposal).isEmpty());
+            if (owned) REQUIRE(adapter.draftRequest().value("clips") == operations);
             REQUIRE(stack->count() == 1);
             REQUIRE(bin->getAllClipIds().size() == assets);
             REQUIRE(timeline->getTrackClipsCount(video) == 3);
@@ -246,6 +421,7 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
             }
             REQUIRE_FALSE(adapter.applyTiming(context, timing, proposal).isEmpty());
             stack->undo();
+            if (owned) REQUIRE(adapter.draftRequest() == draftBefore);
             for (int i = 0; i < 3; ++i) {
                 REQUIRE(timeline->getClipPosition(ids[i]) == 20 + i * shot);
                 REQUIRE(timeline->getClipPlaytime(ids[i]) == shot);
@@ -253,6 +429,7 @@ TEST_CASE("Assistant refines existing cuts with native identities and atomic und
             }
             REQUIRE(timeline->checkConsistency());
             stack->redo();
+            if (owned) REQUIRE(adapter.draftRequest().value("clips") == operations);
             REQUIRE(timeline->getClipPosition(ids[1]) == 20 + shot + 3);
             REQUIRE(timeline->getClipPlaytime(ids[1]) == shot - 6);
             REQUIRE(timeline->checkConsistency());

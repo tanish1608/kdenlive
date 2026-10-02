@@ -43,6 +43,21 @@ and **New brief** resets it. Conversations are bounded, session-only and cleared
 when the project/sequence changes. A task list tracks actual analysis, planning,
 review and application; reviewing a proposal is not a background job.
 
+After Apply, a follow-up revises the last assistant draft in place. The native
+adapter supplies its exact clip IDs/source trims and span through `revise_media`;
+the worker returns ordinary v1 insertions within that span, never deletions.
+**Replace draft** removes only those owned clips and inserts the reviewed shots
+as one native Undo. Neighboring clips, audio and caption events remain intact.
+Manual trim/move, locks, groups, mixes, effects or changed source identity refuse
+replacement. Ownership is session-only and clears on project/sequence switch or
+reopen; **New brief** creates a separate appended edit. Demo mode remains append-only.
+See [draft revision checks](../dev-docs/montaz/draft-revision.md).
+
+The panel shows the supported order: story, music, **Align cuts**, **Match cut**,
+then captions. Timing alignment rejects effect-bearing shots and existing
+subtitles. Its native Undo/Redo updates owned draft timing, so later refinements
+can preserve the aligned span; refinements may change the internal boundaries.
+
 Set `GEMINI_API_KEY` and optionally `GEMINI_MODEL`, or use the private settings file
 `~/.config/montaz/assistant.json` with `gemini_api_key` and `gemini_model` fields.
 Keep it owner-readable/writable (`chmod 600`); never add it to the repository.
@@ -298,10 +313,12 @@ both clips in one Undo. Source trims, shot timing and ordering stay unchanged.
 
 Tracked subject size now uses a guarded robust trend fit, with local position
 smoothing. It retains the baseline when fitting cannot explain measured motion
-or satisfy existing coverage/zoom gates. Cache version `object-match-5`
+or satisfy existing coverage/zoom gates. Cache version `object-match-6`
 invalidates older alignment geometry; other evidence caches are unchanged.
-Controlled exports reduce size jitter from 1.13% to 0.42% per frame. Real zoom
-tracking remains unreliable, and small genuine size changes can be flattened;
+The October 1 constant-size exports reduced size jitter from 1.13% to 0.42% per
+frame. Native fixed-seed scale registration now recovers the ten controlled zoom
+windows, with maximum boundary size error 3.39%; the constant fixture now measures
+0.70% size jitter per frame. Real footage and very small zooms still need calibration;
 review motion after Apply. See [stability evidence](../dev-docs/montaz/match-stability-report.md).
 
 An empty answer finishes as **No match**. Unstable tracking, excessive cropping,

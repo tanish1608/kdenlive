@@ -85,5 +85,6 @@ private:
     int m_requestedSeconds{0};
     QJsonObject m_snapshot;
     QJsonObject m_proposal;
+    QJsonObject m_draftSpec;
 };
 } // namespace Montaz

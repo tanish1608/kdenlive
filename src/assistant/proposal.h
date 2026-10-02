@@ -7,6 +7,9 @@
 #include <QString>
 
 namespace Montaz {
+QString validateDraftRequest(const QJsonObject &snapshot, const QJsonObject &draft);
+QJsonObject draftPlanningSnapshot(const QJsonObject &snapshot, const QJsonObject &draft);
+QString validateDraftProposal(const QJsonObject &snapshot, const QJsonObject &draft, const QJsonObject &proposal, const QSet<QString> &appliedRequests = {});
 QString validateMatchRequest(const QJsonObject &snapshot, const QJsonObject &spec);
 QString validateMatchReview(const QJsonObject &snapshot, const QJsonObject &spec, const QJsonObject &review);
 QString validateCaptionRequest(const QJsonObject &snapshot, const QJsonObject &spec);
