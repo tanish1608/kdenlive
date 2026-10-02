@@ -67,6 +67,13 @@ bool Montaz::WorkerClient::start(const QJsonObject &snapshot, const QJsonObject 
     const auto cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     const auto logDirectory = cache + QStringLiteral("/montaz/runs");
     m_logPath = !cache.isEmpty() && QDir().mkpath(logDirectory) ? logDirectory + QLatin1Char('/') + m_requestId + QStringLiteral(".jsonl") : QString();
+    if (!m_logPath.isEmpty()) {
+        // Keep the newest run logs only; never touch files this client did not name.
+        const QRegularExpression runLog(QStringLiteral("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jsonl$"));
+        int kept = 0;
+        for (const auto &entry : QDir(logDirectory).entryInfoList({QStringLiteral("*.jsonl")}, QDir::Files, QDir::Time))
+            if (runLog.match(entry.fileName()).hasMatch() && ++kept >= MaxRunLogs) QFile::remove(entry.absoluteFilePath());
+    }
     m_proposal = {};
     m_review = {};
     m_soundtrack = {};

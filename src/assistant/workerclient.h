@@ -19,6 +19,7 @@ public:
     bool busy() const { return m_busy; }
     QJsonObject editorialReview() const { return m_review; }
     void recordApply(const QString &requestId, const QString &resultCode);
+    static constexpr int MaxRunLogs = 200;
 
 Q_SIGNALS:
     void busyChanged(bool busy);

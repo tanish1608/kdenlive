@@ -7,6 +7,7 @@
 #include "workerclient.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -16,6 +17,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUuid>
 
 #ifdef Q_OS_UNIX
 #include <signal.h>
@@ -558,6 +560,30 @@ time.sleep(10)
         client.stop();
         QTRY_COMPARE_WITH_TIMEOUT(stopped.count(), 1, 3000);
         QCOMPARE(ready.count(), 0);
+    }
+    void runLogsAreBoundedWithoutTouchingOtherFiles()
+    {
+        const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/montaz/runs/");
+        QVERIFY(QDir().mkpath(directory));
+        const auto old = QDateTime::currentDateTimeUtc().addDays(-30);
+        for (int i = 0; i < Montaz::WorkerClient::MaxRunLogs + 20; ++i) {
+            QFile file(directory + QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".jsonl"));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("{}\n");
+            file.setFileTime(old.addSecs(i), QFileDevice::FileModificationTime);
+        }
+        for (const auto &name : {QStringLiteral("notes.jsonl"), QStringLiteral("notes.txt")}) {
+            QFile file(directory + name);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.setFileTime(old.addDays(-1), QFileDevice::FileModificationTime);
+        }
+        Montaz::WorkerClient client(qEnvironmentVariable("MONTAZ_TEST_PYTHON"), qEnvironmentVariable("MONTAZ_TEST_SOURCE"));
+        QVERIFY(client.start(snapshot()));
+        QTRY_VERIFY_WITH_TIMEOUT(!client.busy(), 5000);
+        const auto logs = QDir(directory).entryList({QStringLiteral("*-*-*-*-*.jsonl")}, QDir::Files);
+        QCOMPARE(logs.size(), Montaz::WorkerClient::MaxRunLogs);
+        QVERIFY(QFile::exists(directory + QStringLiteral("notes.jsonl")));
+        QVERIFY(QFile::exists(directory + QStringLiteral("notes.txt")));
     }
     void stopAndDestructionReachWorkerMediaChildren()
     {
