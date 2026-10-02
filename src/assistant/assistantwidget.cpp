@@ -808,11 +808,15 @@ void Montaz::AssistantWidget::submitMessage(const QString &message)
     case ChatAction::MatchCut:
         matchCut();
         return;
+    case ChatAction::Captions:
+        generateCaptions();
+        return;
     case ChatAction::UnavailableTransition:
         reply(i18n("That transition is not available yet. Beat-synced cuts and Match cut are available from Transitions."));
         return;
     case ChatAction::InvalidSound:
-        reply(i18n("Describe one sound in up to 1,000 characters, with a duration from 0.5 to 10 seconds."));
+        reply(i18n("Describe one sound in up to 1,000 characters, with a duration from 0.5 to 10 seconds, for example “add a 2 second sound of "
+                   "gentle waves”. Or ask me to “suggest sounds” for the current edit."));
         return;
     case ChatAction::Edit:
         planEdit(message);

@@ -88,8 +88,9 @@ TEST_CASE("Assistant keeps optional tools together and sound requests out of the
     REQUIRE(composer);
     // No document/media: these requests must settle before configuring a
     // provider, not fall through to a visual edit or leave the composer busy.
-    for (const auto &request : {QStringLiteral("Suggest sounds"), QStringLiteral("Add a 2 second sound of waves"),
-                                QStringLiteral("Add a 11 second sound of waves"), QStringLiteral("Apply a whip pan")}) {
+    for (const auto &request :
+         {QStringLiteral("Suggest sounds"), QStringLiteral("Add a 2 second sound of waves"), QStringLiteral("Add a 11 second sound of waves"),
+          QStringLiteral("Apply a whip pan"), QStringLiteral("Add a sound effect"), QStringLiteral("Add sound:"), QStringLiteral("Add captions please")}) {
         composer->setPlainText(request);
         chat->submit();
         REQUIRE_FALSE(worker->busy());

@@ -316,9 +316,16 @@ private Q_SLOTS:
         QCOMPARE(Montaz::chatCommand(QStringLiteral("Can you apply a match cut between these two clips?")).action, ChatAction::MatchCut);
         QCOMPARE(Montaz::chatCommand(QStringLiteral("Add background music")).action, ChatAction::Music);
         QCOMPARE(Montaz::chatCommand(QStringLiteral("suggest sound effects")).action, ChatAction::SoundSuggestions);
-        for (const auto &message : {QStringLiteral("Don't add match cuts"), QStringLiteral("Explain match cuts"),
-                                    QStringLiteral("Align cuts and make a longer edit"), QStringLiteral("Create a travel edit with no sound effects"),
-                                    QStringLiteral("Suggest sounds\nand change all my clips"), QStringLiteral("Add music and apply match cuts")}) {
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("Add music please")).action, ChatAction::Music);
+        QCOMPARE(Montaz::chatCommand(QStringLiteral("add background music to the video")).action, ChatAction::Music);
+        for (const auto &message :
+             {QStringLiteral("Add captions"), QStringLiteral("generate subtitles for the speech"), QStringLiteral("Can you add captions to this video?")})
+            QCOMPARE(Montaz::chatCommand(message).action, ChatAction::Captions);
+        for (const auto &message :
+             {QStringLiteral("Don't add match cuts"), QStringLiteral("Explain match cuts"), QStringLiteral("Align cuts and make a longer edit"),
+              QStringLiteral("Create a travel edit with no sound effects"), QStringLiteral("Suggest sounds\nand change all my clips"),
+              QStringLiteral("Add music and apply match cuts"), QStringLiteral("Don't add captions"), QStringLiteral("Add captions and music"),
+              QStringLiteral("Add music to the beach scenes")}) {
             QCOMPARE(Montaz::chatCommand(message).action, ChatAction::Edit);
         }
     }
@@ -334,8 +341,13 @@ private Q_SLOTS:
         QCOMPARE(simple.description, QStringLiteral("quiet footsteps"));
         QCOMPARE(simple.seconds, 2.0);
         QCOMPARE(Montaz::chatCommand(QStringLiteral("add a .5 second sound of a click")).seconds, 0.5);
+        const auto polite = Montaz::chatCommand(QStringLiteral("Add a sound of seagulls, please"));
+        QCOMPARE(polite.action, ChatAction::SoundEffect);
+        QCOMPARE(polite.description, QStringLiteral("seagulls"));
         for (const auto &message : {QStringLiteral("add a 11 second sound of a click"), QStringLiteral("add a 0 second sound of a click"),
-                                    QStringLiteral("add a -1 second sound of a click"), QStringLiteral("add sound: ") + QString(1001, 'a')})
+                                    QStringLiteral("add a -1 second sound of a click"), QStringLiteral("add sound: ") + QString(1001, 'a'),
+                                    QStringLiteral("Add a sound"), QStringLiteral("add a sound effect."), QStringLiteral("Add sound:"),
+                                    QStringLiteral("add a sound of"), QStringLiteral("add a 3 second sound for")})
             QCOMPARE(Montaz::chatCommand(message).action, ChatAction::InvalidSound);
     }
     void unavailableTransitionsDoNotStartAnEditingBrief()
