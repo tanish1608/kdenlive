@@ -89,12 +89,17 @@ recordings, projects and exports outside Git.
 
 ### D06 — Match-cut comparison
 
-- [ ] Choose the cleanest compatible pair of car/wheel shots; keep viewpoint,
+- [x] Map the supplied 26 photo-derived side-profile clips and prepare native
+  6-frame/12-frame mash-cut projects and exports. [Evidence](demo-car-mashcuts.md).
+- [x] Choose a compatible sedan pair for a real selected-pair review; keep viewpoint,
   whole-subject position and scale comparable. If using car photographs, prepare
   video sources and describe them honestly as photo-derived shots.
-- [ ] Use the existing selected-pair Match cut review; inspect whole-subject
+- [x] Use the existing selected-pair Match cut review; inspect whole-subject
   alignment, zoom softness and frames immediately before/after the cut.
+  The tested proposal worsened already aligned inputs and was rejected.
 - [ ] Record plain versus aligned versions with identical timing and sources.
+  The prepared mash-cut reel is ready; a convincing **AI alignment improvement**
+  still needs an unaligned source pair.
 - [ ] Use 20–40 s only if the result reads clearly; give unused time to beat sync.
   No new automatic multi-shot montage is required.
 
@@ -150,5 +155,12 @@ recordings, projects and exports outside Git.
 ## Working log
 
 Add completed item IDs, artifact paths, results and any concrete blockers here.
-No preparation beyond this checklist has been started; await the user's first
-priority before running apps, generating media, fetching clips or building slides.
+
+- October 2: D01 car sources mapped; D06 prepared 26-shot native projects and
+  1080p/30 fps exports in `~/Movies/montaz-demo-mashcuts-20261002/`.
+  The 6-frame reel is 156 frames/5.2 s; the 12-frame reel is 312 frames/10.4 s.
+  Every exported frame matches its expected source. Source credits retained.
+  One real Gemini pair review proposed transforms that added 9–10 px wheel drift;
+  preserved the supplied geometry. No new montage feature or AI improvement
+  claimed. One Qt accessibility crash during render-job insertion remains open;
+  reloading the saved project and retrying the export succeeded.
