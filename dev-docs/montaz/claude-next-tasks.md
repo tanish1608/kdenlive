@@ -3,6 +3,10 @@
 
 # Claude assignment: independent completion packages
 
+Historical assignment: C01–C04 are reviewed and integrated. The active assignment
+is [existing-app maintenance H01–H14](claude-maintenance-handoff.md), which
+supersedes these file-owner restrictions and pauses new-feature work.
+
 Assigned October 2, 2026. Current tasks are C01–C04 in the
 [active checklist](completion-checklist.md); old M/S assignments are complete.
 Codex owns integration, native contracts/editor/helper, worker/transport,

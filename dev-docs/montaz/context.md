@@ -504,3 +504,21 @@ were measured independently; see [integration evidence](claude-integration-revie
 Next: N02 reviewed compatible-shot suggestions, then N03 joint framing and an
 explicit quick montage. Whips/wipes/ramps, final audio/caption lifecycle audits and
 end-to-end perceptual quality remain pending. Do not call the full app complete.
+
+## Maintenance delegation; new features paused — October 2
+
+The user requested maximum useful maintenance work for Claude while Codex is
+away, explicitly leaving compatible-shot suggestions and other new features.
+[claude-maintenance-handoff.md](claude-maintenance-handoff.md) assigns H01–H14:
+Stop/deadlines, silence and caption styles/frame bounds, native preservation/Undo,
+chat intent/polish, existing script/cut quality, cache efficiency, existing beats,
+audio preparation, logs/API errors, native time/export checks, existing pair-match
+stability and combined current-workflow validation. New features remain on hold.
+
+The reserved branch is `codex/claude-existing-app-hardening`, based on current
+integrated code `a6ffb86`. Claude may fix shared assistant/native files under this
+explicit new handoff; historical Codex-only file restrictions no longer block
+evidenced maintenance fixes. Native builds must remain isolated. Codex will not
+edit those files concurrently and reviews/merges the delivered local branch later.
+Claude maintains its own H01–H14 report, not the master completion statuses.
+This document prepares delegation; it does not start an external Claude session.

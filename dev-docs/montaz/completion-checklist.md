@@ -14,6 +14,15 @@ items here after review, combined tests and applicable native/output verificatio
 Add newly discovered failures under the affected item. Passing tests alone does
 not establish perceptual quality.
 
+## Current priority: maintenance only
+
+The user paused new features on October 2. Claude owns the existing-app bug/quality
+queue [H01–H14](claude-maintenance-handoff.md) while Codex is away. Compatible-shot
+suggestions, quick montage UI, new transitions, recipe wiring and new speech/audio
+modes are on hold. Existing features may be fixed and measured; pending feature
+items below remain recorded rather than removed. Claude delivers local commits
+and its own report; Codex reviews before checking off further master milestones.
+
 ## Verified foundation
 
 - [x] F01 — Right AI dock, native project preview, brief refinements, task states,
@@ -155,8 +164,9 @@ These do not block the current app milestone and are not assigned for implementa
 ## Execution order
 
 C01–C04 and N01 are integrated; N03a's native contract has synthetic validation.
-Next integrate C01 through N02 and validate the joint N03 montage on real clips.
-After that: N04/N05 and N06, measured T01/T02, then T03;
+Now execute Claude's maintenance H01–H14 and review that branch. New-feature work
+is paused until the user resumes it. The previous feature order remains recorded:
+N02/N03, N04/N05 and N06, measured T01/T02, then T03;
 speech/audio work and Q checks complete the app audit. Claude's independent
 packages may proceed sequentially or in isolated branches in parallel. Neither
 engineer changes the other's owned files without an explicit updated handoff.
